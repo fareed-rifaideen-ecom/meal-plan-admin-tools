@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer & Database Cleanup).
- * Version: 1.0
+ * Version: 1.1
  * Author: FMR
  */
 
@@ -12,8 +12,8 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 // ==========================================
 // 1. REGISTER INDEPENDENT ADMIN MENU
 // ==========================================
-add_action( 'admin_menu', 'cmp_admin_tools_menu' );
-function cmp_admin_tools_menu() {
+add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu' );
+function cmp_standalone_admin_tools_menu() {
     
     // Create a brand new Top-Level Menu to completely avoid slug/loading conflicts
     add_menu_page(
@@ -21,7 +21,7 @@ function cmp_admin_tools_menu() {
         'Meal Admin Tools',
         'manage_options',
         'cmp-admin-tools',
-        'cmp_render_manual_import_page',
+        'cmp_standalone_render_manual_import',
         'dashicons-admin-tools', // Wrench & Gear icon
         59 // Places it right below your existing plugins
     );
@@ -33,7 +33,7 @@ function cmp_admin_tools_menu() {
         'Import Subscriber',
         'manage_options',
         'cmp-admin-tools', // Matching parent slug makes this the default tab
-        'cmp_render_manual_import_page'
+        'cmp_standalone_render_manual_import'
     );
 
     // Second Submenu: Cleanup Tool
@@ -43,14 +43,14 @@ function cmp_admin_tools_menu() {
         'Cleanup Tool',
         'manage_options',
         'cmp-db-cleanup',
-        'cmp_render_cleanup_page'
+        'cmp_standalone_render_cleanup'
     );
 }
 
 // ==========================================
 // 2. MANUAL SUBSCRIBER IMPORT TOOL
 // ==========================================
-function cmp_render_manual_import_page() {
+function cmp_standalone_render_manual_import() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
     global $wpdb;
     $message = '';
@@ -225,7 +225,7 @@ function cmp_render_manual_import_page() {
 // ==========================================
 // 3. DATABASE CLEANUP TOOL
 // ==========================================
-function cmp_render_cleanup_page() {
+function cmp_standalone_render_cleanup() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
     global $wpdb;
     $table_subs = $wpdb->prefix . 'cmp_subscriptions';
