@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name: Meal Plan Admin Tools
- * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer & Database Cleanup).
- * Version: 1.1
- * Author: FMR
+ * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, & Database Cleanup).
+ * Version: 1.2
+ * Author: Fareed M Rifaideen
  */
 
 // Prevent direct file access
@@ -48,13 +48,141 @@ function cmp_standalone_admin_tools_menu() {
 }
 
 // ==========================================
-// 2. MANUAL SUBSCRIBER IMPORT TOOL
+// 2. CSV TEMPLATE DOWNLOADER
+// ==========================================
+add_action( 'admin_init', 'cmp_download_csv_template' );
+function cmp_download_csv_template() {
+    if ( isset( $_GET['cmp_download_template'] ) && current_user_can( 'manage_options' ) ) {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="Meal_Plan_Bulk_Import_Template.csv"');
+        $output = fopen('php://output', 'w');
+        fputs($output, chr(0xEF) . chr(0xBB) . chr(0xBF)); 
+
+        // Define exact headers required for the bulk importer
+        fputcsv($output, array('Email', 'First Name', 'Last Name', 'Phone', 'Address', 'Delivery Method (Delivery/Pickup)', 'Receive By (Deliver Day Before/Deliver Same Day)', 'Time Slot', 'Allergies', 'Plan Name', 'Remaining Days'));
+        
+        // Add a sample row to guide the FOH Manager
+        fputcsv($output, array('john@example.com', 'John', 'Doe', '0501234567', 'Dubai Marina', 'Delivery', 'Deliver Day Before', '5:00 AM to 6:00 AM', 'Nuts', '2 Meal Plan', '20'));
+
+        fclose($output);
+        exit;
+    }
+}
+
+// ==========================================
+// 3. SUBSCRIBER IMPORT TOOL (MANUAL & BULK CSV)
 // ==========================================
 function cmp_standalone_render_manual_import() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
     global $wpdb;
     $message = '';
+    $table_subs = $wpdb->prefix . 'cmp_subscriptions';
 
+    // --- HANDLE BULK CSV IMPORT ---
+    if ( isset( $_POST['cmp_run_csv_import'] ) && check_admin_referer( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ) ) {
+        if ( !empty( $_FILES['csv_file']['tmp_name'] ) ) {
+            
+            $file = $_FILES['csv_file']['tmp_name'];
+            $handle = fopen($file, "r");
+            
+            if ($handle !== FALSE) {
+                $row_count = 0;
+                $success_count = 0;
+                $failed_rows = array();
+
+                // Skip the header row
+                fgetcsv($handle, 1000, ",");
+
+                while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                    $row_count++;
+                    
+                    // Safely map CSV columns to variables
+                    $email          = isset($data[0]) ? sanitize_email($data[0]) : '';
+                    $first_name     = isset($data[1]) ? sanitize_text_field($data[1]) : '';
+                    $last_name      = isset($data[2]) ? sanitize_text_field($data[2]) : '';
+                    $phone          = isset($data[3]) ? sanitize_text_field($data[3]) : '';
+                    $address        = isset($data[4]) ? sanitize_text_field($data[4]) : '';
+                    $method         = isset($data[5]) ? sanitize_text_field($data[5]) : '';
+                    $timing         = isset($data[6]) ? sanitize_text_field($data[6]) : '';
+                    $time_slot      = isset($data[7]) ? sanitize_text_field($data[7]) : '';
+                    $allergies      = isset($data[8]) ? sanitize_text_field($data[8]) : '';
+                    $plan_name      = isset($data[9]) ? sanitize_text_field($data[9]) : '';
+                    $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
+
+                    // Strict Validation: Skip row if critical data is missing
+                    if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
+                        $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Remaining Days.";
+                        continue;
+                    }
+
+                    // 1. Fetch or Create User Profile
+                    $user = get_user_by('email', $email);
+                    if (!$user) {
+                        $password = wp_generate_password(12, false);
+                        $user_id = wp_create_user($email, $password, $email);
+                        if (is_wp_error($user_id)) {
+                            $failed_rows[] = "Row $row_count ($email): " . $user_id->get_error_message();
+                            continue;
+                        }
+                    } else {
+                        $user_id = $user->ID;
+                    }
+
+                    // 2. Save Logistics to User Meta
+                    wp_update_user(array('ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name));
+                    if(!empty($phone)) update_user_meta($user_id, 'billing_phone', $phone);
+                    if(!empty($address)) update_user_meta($user_id, 'billing_address_1', $address);
+                    if(!empty($method)) update_user_meta($user_id, 'delivery_method', $method);
+                    if(!empty($timing)) update_user_meta($user_id, 'delivery_timing', $timing);
+                    if(!empty($time_slot)) update_user_meta($user_id, 'time_slot', $time_slot);
+                    if(!empty($allergies)) update_user_meta($user_id, 'allergies', $allergies);
+
+                    // 3. Determine Categories for the Quota System
+                    if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
+                        $categories = 'Juices';
+                    } else {
+                        $categories = 'Breakfast,Lunch,Dinner,Snacks';
+                    }
+
+                    // 4. Inject Directly into Subscription Database
+                    $inserted = $wpdb->insert($table_subs, array(
+                        'user_id'            => $user_id,
+                        'wc_order_id'        => 0, // Order ID 0 flags this as a manual import
+                        'plan_name'          => $plan_name,
+                        'total_days'         => $remaining_days,
+                        'allowed_categories' => $categories,
+                        'status'             => 'active',
+                        'start_date'         => date('Y-m-d H:i:s'),
+                        'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
+                    ));
+
+                    if ($inserted) {
+                        $success_count++;
+                    } else {
+                        $failed_rows[] = "Row $row_count ($email): Database insertion failed.";
+                    }
+                }
+                fclose($handle);
+
+                // Build Final Success/Failure Message
+                if ($success_count > 0) {
+                    $message .= '<div class="notice notice-success"><p><strong>Success!</strong> Successfully imported <strong>' . $success_count . '</strong> customers from the CSV file.</p></div>';
+                }
+                if (!empty($failed_rows)) {
+                    $err_list = implode('<br>', $failed_rows);
+                    $message .= '<div class="notice notice-error"><p><strong>Warning:</strong> The following rows failed to import:<br>' . $err_list . '</p></div>';
+                }
+
+            } else {
+                $message = '<div class="notice notice-error"><p>Error: Could not read the CSV file.</p></div>';
+            }
+        } else {
+            $message = '<div class="notice notice-error"><p>Error: Please select a valid CSV file to upload.</p></div>';
+        }
+    }
+
+
+    // --- HANDLE SINGLE MANUAL IMPORT ---
     if ( isset( $_POST['cmp_run_import'] ) && check_admin_referer( 'cmp_import_action', 'cmp_import_nonce' ) ) {
         $email          = sanitize_email($_POST['email']);
         $first_name     = sanitize_text_field($_POST['first_name']);
@@ -102,7 +230,6 @@ function cmp_standalone_render_manual_import() {
                 }
 
                 // 4. Inject Directly into Subscription Database
-                $table_subs = $wpdb->prefix . 'cmp_subscriptions';
                 $inserted = $wpdb->insert($table_subs, array(
                     'user_id'            => $user_id,
                     'wc_order_id'        => 0, // Order ID 0 flags this as a manual import for FOH
@@ -115,7 +242,7 @@ function cmp_standalone_render_manual_import() {
                 ));
 
                 if ($inserted) {
-                    $message = '<div class="notice notice-success"><p><strong>Success!</strong> ' . esc_html($first_name) . ' has been imported and assigned <strong>' . $remaining_days . ' days</strong>. They can now log into the Customer Portal using their email address.</p></div>';
+                    $message = '<div class="notice notice-success"><p><strong>Success!</strong> ' . esc_html($first_name) . ' has been manually imported and assigned <strong>' . $remaining_days . ' days</strong>.</p></div>';
                 } else {
                     $message = '<div class="notice notice-error"><p>Database error during insertion.</p></div>';
                 }
@@ -124,12 +251,27 @@ function cmp_standalone_render_manual_import() {
     }
     ?>
     <div class="wrap">
-        <h1 style="margin-bottom: 20px;">Import Legacy Subscriber</h1>
+        <h1 style="margin-bottom: 20px;">Import Legacy Subscribers</h1>
         <?php echo $message; ?>
+
+        <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04); margin-bottom: 30px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
+                <h2 style="margin: 0; color: #1d6f42;">Bulk CSV Import</h2>
+                <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
+            </div>
+            
+            <p style="color: #666; margin-bottom: 20px;">Download the template above, fill it out strictly matching the column headers, and upload it here to import dozens of customers at once.</p>
+            
+            <form method="POST" action="" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px; background: #f8f9fa; padding: 15px; border: 1px dashed #ccc; border-radius: 4px;">
+                <?php wp_nonce_field( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ); ?>
+                <input type="file" name="csv_file" accept=".csv" required style="font-size: 1em;">
+                <button type="submit" name="cmp_run_csv_import" class="button button-primary" style="background: #1d6f42; border-color: #1d6f42;">Process CSV Upload</button>
+            </form>
+        </div>
         
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
-            <h2 style="margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px;">Manual Entry Form</h2>
-            <p style="color: #666; margin-bottom: 25px;">Use this tool to add customers who paid offline or are halfway through an old plan. If the email address doesn't exist in the system, a new account will be auto-created.</p>
+            <h2 style="margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px;">Single Manual Entry Form</h2>
+            <p style="color: #666; margin-bottom: 25px;">Use this tool to add a single customer who paid offline or is halfway through an old plan. If the email address doesn't exist in the system, a new account will be auto-created.</p>
             
             <form method="POST" action="">
                 <?php wp_nonce_field( 'cmp_import_action', 'cmp_import_nonce' ); ?>
@@ -215,7 +357,7 @@ function cmp_standalone_render_manual_import() {
                     </div>
                 </div>
 
-                <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #16a34a; border-color: #16a34a; padding: 5px 30px;">Import Customer</button>
+                <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #0073aa; padding: 5px 30px;">Import Single Customer</button>
             </form>
         </div>
     </div>
@@ -223,7 +365,7 @@ function cmp_standalone_render_manual_import() {
 }
 
 // ==========================================
-// 3. DATABASE CLEANUP TOOL
+// 4. DATABASE CLEANUP TOOL
 // ==========================================
 function cmp_standalone_render_cleanup() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
