@@ -10,7 +10,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 // ==========================================
-// 1. REGISTER INDEPENDENT ADMIN MENU
+// 1. REGISTER INDEPENDENT ADMIN MENU (BACKEND)
 // ==========================================
 add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu' );
 function cmp_standalone_admin_tools_menu() {
@@ -48,11 +48,11 @@ function cmp_standalone_admin_tools_menu() {
 }
 
 // ==========================================
-// 2. CSV TEMPLATE DOWNLOADER
+// 2. CSV TEMPLATE DOWNLOADER (AVAILABLE FRONT & BACK)
 // ==========================================
-add_action( 'admin_init', 'cmp_download_csv_template' );
+add_action( 'init', 'cmp_download_csv_template' ); // Changed to init so frontend portals can trigger it
 function cmp_download_csv_template() {
-    if ( isset( $_GET['cmp_download_template'] ) && current_user_can( 'manage_options' ) ) {
+    if ( isset( $_GET['cmp_download_template'] ) && (current_user_can( 'manage_options' ) || current_user_can( 'menu_manager' )) ) {
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="Meal_Plan_Bulk_Import_Template.csv"');
         $output = fopen('php://output', 'w');
@@ -70,7 +70,7 @@ function cmp_download_csv_template() {
 }
 
 // ==========================================
-// 3. SUBSCRIBER IMPORT TOOL (MANUAL & BULK CSV)
+// 3. BACKEND: SUBSCRIBER IMPORT TOOL 
 // ==========================================
 function cmp_standalone_render_manual_import() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
@@ -257,7 +257,7 @@ function cmp_standalone_render_manual_import() {
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04); margin-bottom: 30px;">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #1d6f42;">Bulk CSV Import</h2>
-                <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
+                <a href="<?php echo admin_url('admin-ajax.php?action=cmp_download_template'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
             </div>
             
             <p style="color: #666; margin-bottom: 20px;">Download the template above, fill it out strictly matching the column headers, and upload it here to import dozens of customers at once.</p>
@@ -365,7 +365,7 @@ function cmp_standalone_render_manual_import() {
 }
 
 // ==========================================
-// 4. DATABASE CLEANUP TOOL
+// 4. BACKEND: DATABASE CLEANUP TOOL
 // ==========================================
 function cmp_standalone_render_cleanup() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
@@ -419,4 +419,325 @@ function cmp_standalone_render_cleanup() {
         </div>
     </div>
     <?php
+}
+
+// ==========================================
+// 5. FRONTEND: ADMIN TOOLS PORTAL
+// ==========================================
+add_shortcode( 'meal_admin_tools', 'cmp_render_frontend_admin_tools' );
+function cmp_render_frontend_admin_tools() {
+    
+    // 1. Security Check
+    if ( ! is_user_logged_in() ) {
+        $login_args = array('echo' => false, 'form_id' => 'cmp-tools-login', 'label_username' => __('Email Address or Username'), 'label_password' => __('Password'));
+        $custom_css = '<style>#cmp-tools-login label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; text-align: left; } #cmp-tools-login input[type="text"], #cmp-tools-login input[type="password"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; } #cmp-tools-login .login-submit input[type="submit"] { width: 100%; background: #0073aa; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }</style>';
+        return $custom_css . '<div style="max-width:400px; margin:50px auto; padding:30px; background:#f8f9fa; border-radius:8px; border:1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,0.05);"><h2 style="text-align:center; margin-top:0; color:#222;">Admin Tools Login</h2><p style="text-align:center; color:#666; margin-bottom:20px;">Please log in with an authorized account.</p>' . wp_login_form( $login_args ) . '</div>';
+    }
+
+    if ( !current_user_can('manage_options') && !current_user_can('menu_manager') ) {
+        return '<div style="max-width: 600px; margin: 50px auto; padding: 30px; background: #fff; border-left: 4px solid #dc3232; box-shadow: 0 4px 6px rgba(0,0,0,0.05);"><p style="font-size: 1.1em; color: #dc3232;"><strong>Access Denied:</strong> You do not have permission to view Admin Tools.</p></div>';
+    }
+
+    global $wpdb;
+    $table_subs = $wpdb->prefix . 'cmp_subscriptions';
+    $table_logs = $wpdb->prefix . 'cmp_daily_logs';
+    $import_message = '';
+    $cleanup_message = '';
+
+    // --- HANDLE FORM SUBMISSIONS ON FRONTEND ---
+
+    // A. CSV Bulk Import
+    if ( isset( $_POST['cmp_frontend_csv_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') ) {
+        if ( !empty( $_FILES['csv_file']['tmp_name'] ) ) {
+            $file = $_FILES['csv_file']['tmp_name'];
+            $handle = fopen($file, "r");
+            if ($handle !== FALSE) {
+                $row_count = 0; $success_count = 0; $failed_rows = array();
+                fgetcsv($handle, 1000, ","); // skip header
+                while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
+                    $row_count++;
+                    $email          = isset($data[0]) ? sanitize_email($data[0]) : '';
+                    $first_name     = isset($data[1]) ? sanitize_text_field($data[1]) : '';
+                    $last_name      = isset($data[2]) ? sanitize_text_field($data[2]) : '';
+                    $phone          = isset($data[3]) ? sanitize_text_field($data[3]) : '';
+                    $address        = isset($data[4]) ? sanitize_text_field($data[4]) : '';
+                    $method         = isset($data[5]) ? sanitize_text_field($data[5]) : '';
+                    $timing         = isset($data[6]) ? sanitize_text_field($data[6]) : '';
+                    $time_slot      = isset($data[7]) ? sanitize_text_field($data[7]) : '';
+                    $allergies      = isset($data[8]) ? sanitize_text_field($data[8]) : '';
+                    $plan_name      = isset($data[9]) ? sanitize_text_field($data[9]) : '';
+                    $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
+
+                    if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
+                        $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Remaining Days.";
+                        continue;
+                    }
+
+                    $user = get_user_by('email', $email);
+                    if (!$user) {
+                        $password = wp_generate_password(12, false);
+                        $user_id = wp_create_user($email, $password, $email);
+                        if (is_wp_error($user_id)) {
+                            $failed_rows[] = "Row $row_count ($email): " . $user_id->get_error_message(); continue;
+                        }
+                    } else { $user_id = $user->ID; }
+
+                    wp_update_user(array('ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name));
+                    if(!empty($phone)) update_user_meta($user_id, 'billing_phone', $phone);
+                    if(!empty($address)) update_user_meta($user_id, 'billing_address_1', $address);
+                    if(!empty($method)) update_user_meta($user_id, 'delivery_method', $method);
+                    if(!empty($timing)) update_user_meta($user_id, 'delivery_timing', $timing);
+                    if(!empty($time_slot)) update_user_meta($user_id, 'time_slot', $time_slot);
+                    if(!empty($allergies)) update_user_meta($user_id, 'allergies', $allergies);
+
+                    if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
+                        $categories = 'Juices';
+                    } else { $categories = 'Breakfast,Lunch,Dinner,Snacks'; }
+
+                    $inserted = $wpdb->insert($table_subs, array(
+                        'user_id'            => $user_id,
+                        'wc_order_id'        => 0,
+                        'plan_name'          => $plan_name,
+                        'total_days'         => $remaining_days,
+                        'allowed_categories' => $categories,
+                        'status'             => 'active',
+                        'start_date'         => date('Y-m-d H:i:s'),
+                        'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
+                    ));
+
+                    if ($inserted) $success_count++;
+                    else $failed_rows[] = "Row $row_count ($email): DB Error.";
+                }
+                fclose($handle);
+
+                if ($success_count > 0) $import_message .= '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Imported ' . $success_count . ' customers.</div>';
+                if (!empty($failed_rows)) $import_message .= '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Warning:</strong> Some rows failed:<br>' . implode('<br>', $failed_rows) . '</div>';
+            } else { $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Error reading CSV.</div>'; }
+        }
+    }
+
+    // B. Manual Single Import
+    if ( isset( $_POST['cmp_frontend_manual_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') ) {
+        $email          = sanitize_email($_POST['email']);
+        $first_name     = sanitize_text_field($_POST['first_name']);
+        $last_name      = sanitize_text_field($_POST['last_name']);
+        $phone          = sanitize_text_field($_POST['phone']);
+        $plan_name      = sanitize_text_field($_POST['plan_name']);
+        $remaining_days = intval($_POST['remaining_days']);
+        $method         = sanitize_text_field($_POST['delivery_method']);
+        $timing         = sanitize_text_field($_POST['delivery_timing']);
+        $time_slot      = sanitize_text_field($_POST['time_slot']);
+        $address        = sanitize_text_field($_POST['address']);
+        $allergies      = sanitize_textarea_field($_POST['allergies']);
+
+        if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
+            $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Error: Email, Plan, and Days are required.</div>';
+        } else {
+            $user = get_user_by('email', $email);
+            if (!$user) {
+                $password = wp_generate_password(12, false);
+                $user_id = wp_create_user($email, $password, $email);
+            } else { $user_id = $user->ID; }
+
+            wp_update_user(array('ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name));
+            update_user_meta($user_id, 'billing_phone',     $phone);
+            update_user_meta($user_id, 'billing_address_1', $address);
+            update_user_meta($user_id, 'delivery_method',   $method);
+            update_user_meta($user_id, 'delivery_timing',   $timing);
+            update_user_meta($user_id, 'time_slot',         $time_slot);
+            update_user_meta($user_id, 'allergies',         $allergies);
+
+            if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
+                $categories = 'Juices';
+            } else { $categories = 'Breakfast,Lunch,Dinner,Snacks'; }
+
+            $inserted = $wpdb->insert($table_subs, array(
+                'user_id'            => $user_id,
+                'wc_order_id'        => 0,
+                'plan_name'          => $plan_name,
+                'total_days'         => $remaining_days,
+                'allowed_categories' => $categories,
+                'status'             => 'active',
+                'start_date'         => date('Y-m-d H:i:s'),
+                'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
+            ));
+
+            if ($inserted) {
+                $import_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> ' . esc_html($first_name) . ' added.</div>';
+            } else {
+                $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Database Error.</div>';
+            }
+        }
+    }
+
+    // C. Database Cleanup
+    if ( isset( $_POST['cmp_frontend_run_cleanup'] ) && wp_verify_nonce($_POST['cmp_cleanup_nonce'], 'cmp_frontend_cleanup') ) {
+        $days_old = intval( $_POST['days_old'] );
+        $confirm  = isset( $_POST['confirm_delete'] );
+        if ( $days_old < 30 ) {
+            $cleanup_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Minimum 30 days required.</div>';
+        } elseif ( ! $confirm ) {
+            $cleanup_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Please check confirmation box.</div>';
+        } else {
+            $cutoff_date    = date( 'Y-m-d H:i:s', strtotime( "-$days_old days" ) );
+            $subs_to_delete = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_subs WHERE expiry_date < %s", $cutoff_date ) );
+            if ( empty( $subs_to_delete ) ) {
+                $cleanup_message = '<div style="background:#e0f2fe; color:#0369a1; padding:15px; border-radius:6px; margin-bottom:20px;">No old subscriptions found.</div>';
+            } else {
+                $ids_list     = implode( ',', array_map( 'intval', $subs_to_delete ) );
+                $logs_deleted = $wpdb->query( "DELETE FROM $table_logs WHERE subscription_id IN ($ids_list)" );
+                $subs_deleted = $wpdb->query( "DELETE FROM $table_subs WHERE id IN ($ids_list)" );
+                $cleanup_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deleted ' . intval($subs_deleted) . ' plans and ' . intval($logs_deleted) . ' logs.</div>';
+            }
+        }
+    }
+
+    ob_start();
+    ?>
+    <style>
+        .tools-wrap { max-width: 1200px; margin: 0 auto; font-family: inherit; }
+        .tools-nav { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 25px; overflow-x: auto; }
+        .tools-tab-btn { background: none; border: none; padding: 15px 30px; font-size: 1.1em; font-weight: bold; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; }
+        .tools-tab-btn.active { color: #0f172a; border-bottom: 3px solid #0f172a; }
+        .tools-content { display: none; padding: 10px 0; }
+        .tools-content.active { display: block; }
+        .tools-card { background: #fff; padding: 25px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+        .tools-input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 5px; }
+        .tools-label { font-weight: bold; color: #334155; display: block; margin-bottom: 2px; }
+        .tools-flex { display: flex; gap: 20px; margin-bottom: 15px; flex-wrap: wrap; }
+        .tools-flex > div { flex: 1; min-width: 200px; }
+    </style>
+
+    <div class="tools-wrap">
+        <div style="background: #0f172a; color: #fff; padding: 25px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div>
+                <h2 style="margin: 0; color: #fff;">Admin Tools</h2>
+                <p style="margin: 5px 0 0 0; color: #94a3b8;">Legacy Imports & Database Maintenance</p>
+            </div>
+        </div>
+
+        <div class="tools-nav">
+            <button class="tools-tab-btn active" onclick="switchToolsTab(event, 'tab-import')">Import Subscribers</button>
+            <button class="tools-tab-btn" onclick="switchToolsTab(event, 'tab-cleanup')">Database Cleanup</button>
+        </div>
+
+        <!-- TAB 1: IMPORTER -->
+        <div id="tab-import" class="tools-content active">
+            <?php echo $import_message; ?>
+            
+            <div class="tools-card" style="border-left: 4px solid #10b981;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
+                    <h3 style="margin: 0; color: #047857;">Bulk CSV Import</h3>
+                    <a href="?cmp_download_template=1" style="background: #10b981; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.9em;">Download CSV Template</a>
+                </div>
+                <p style="color: #64748b; margin-bottom: 20px;">Download the template above, fill it out exactly as formatted, and upload it here to import multiple customers.</p>
+                <form method="POST" enctype="multipart/form-data" style="display: flex; gap: 15px; align-items: center;">
+                    <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
+                    <input type="file" name="csv_file" accept=".csv" required style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; flex-grow: 1;">
+                    <button type="submit" name="cmp_frontend_csv_import" style="background: #047857; color: white; border: none; padding: 12px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Upload CSV</button>
+                </form>
+            </div>
+
+            <div class="tools-card" style="border-left: 4px solid #0284c7;">
+                <h3 style="margin-top: 0; color: #0369a1; border-bottom: 1px solid #eee; padding-bottom: 15px;">Single Manual Entry Form</h3>
+                <form method="POST">
+                    <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
+                    
+                    <div class="tools-flex">
+                        <div><label class="tools-label">Email *</label><input type="email" name="email" required class="tools-input"></div>
+                        <div><label class="tools-label">Phone *</label><input type="text" name="phone" required class="tools-input"></div>
+                    </div>
+                    <div class="tools-flex">
+                        <div><label class="tools-label">First Name *</label><input type="text" name="first_name" required class="tools-input"></div>
+                        <div><label class="tools-label">Last Name *</label><input type="text" name="last_name" required class="tools-input"></div>
+                    </div>
+                    <div style="margin-bottom: 15px;">
+                        <label class="tools-label">Delivery Address</label><input type="text" name="address" class="tools-input">
+                    </div>
+                    <hr style="border:0; border-top:1px solid #e2e8f0; margin:25px 0;">
+                    <div class="tools-flex">
+                        <div>
+                            <label class="tools-label">Delivery Method</label>
+                            <select name="delivery_method" class="tools-input">
+                                <option value="Delivery">Home/Office Delivery</option>
+                                <option value="Pickup">Store Pick-up</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="tools-label">Receive By</label>
+                            <select name="delivery_timing" class="tools-input">
+                                <option value="Deliver Day Before">Deliver Day Before</option>
+                                <option value="Deliver Same Day">Deliver Same Day</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="tools-label">Time Slot</label>
+                            <select name="time_slot" class="tools-input">
+                                <option value="5:00 AM to 6:00 AM">5:00 AM to 6:00 AM</option>
+                                <option value="6:00 AM to 7:00 AM">6:00 AM to 7:00 AM</option>
+                                <option value="7:00 AM to 8:00 AM">7:00 AM to 8:00 AM</option>
+                                <option value="8:00 AM to 9:00 AM" selected>8:00 AM to 9:00 AM</option>
+                                <option value="5:00 PM to 8:00 PM">5:00 PM to 8:00 PM</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <label class="tools-label">Allergies</label><input type="text" name="allergies" placeholder="e.g., Nuts, Shellfish" class="tools-input">
+                    </div>
+                    <hr style="border:0; border-top:1px solid #e2e8f0; margin:25px 0;">
+                    <div class="tools-flex">
+                        <div style="flex:2;">
+                            <label class="tools-label">Select Plan Quota *</label>
+                            <select name="plan_name" class="tools-input">
+                                <option value="1 Meal Plan (Manual)">1 Meal Plan</option>
+                                <option value="2 Meal Plan (Manual)">2 Meal Plan</option>
+                                <option value="3 Meal Plan (Manual)">3 Meal Plan</option>
+                                <option value="Juice Cleanse (Manual)">Juice Cleanse</option>
+                            </select>
+                        </div>
+                        <div style="flex:1;">
+                            <label class="tools-label">Remaining Days *</label>
+                            <input type="number" name="remaining_days" required min="1" class="tools-input" placeholder="e.g. 14">
+                        </div>
+                    </div>
+                    <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- TAB 2: CLEANUP -->
+        <div id="tab-cleanup" class="tools-content">
+            <?php echo $cleanup_message; ?>
+            <div class="tools-card" style="border-left: 4px solid #dc2626;">
+                <h3 style="margin-top: 0; color: #991b1b; border-bottom: 1px solid #eee; padding-bottom: 15px;">Purge Old Subscription Data</h3>
+                <p style="color: #64748b; margin-bottom: 25px;">Permanently delete old subscriptions and daily meal logs. <strong>Customer accounts and addresses will NOT be deleted.</strong></p>
+                <form method="POST">
+                    <?php wp_nonce_field('cmp_frontend_cleanup', 'cmp_cleanup_nonce'); ?>
+                    <div style="margin-bottom: 20px;">
+                        <label class="tools-label">Target Timeframe:</label>
+                        Delete plans expired more than <input type="number" name="days_old" value="90" min="30" style="width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;"> days ago. (Min 30)
+                    </div>
+                    <div style="margin-bottom: 25px;">
+                        <label style="color: #dc2626; font-weight: bold; cursor: pointer;">
+                            <input type="checkbox" name="confirm_delete" value="1" required style="transform: scale(1.2); margin-right: 8px;"> 
+                            I understand this is irreversible.
+                        </label>
+                    </div>
+                    <button type="submit" name="cmp_frontend_run_cleanup" style="background: #dc2626; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Permanently Delete Old Records</button>
+                </form>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+    function switchToolsTab(evt, tabId) {
+        document.querySelectorAll(".tools-content").forEach(c => c.classList.remove("active"));
+        document.querySelectorAll(".tools-tab-btn").forEach(b => b.classList.remove("active"));
+        document.getElementById(tabId).classList.add("active");
+        evt.currentTarget.classList.add("active");
+    }
+    </script>
+    <?php
+    return ob_get_clean();
 }
