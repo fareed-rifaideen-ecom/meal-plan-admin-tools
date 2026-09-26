@@ -10,7 +10,7 @@
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 // ==========================================
-// 1. REGISTER INDEPENDENT ADMIN MENU (BACKEND)
+// 1. REGISTER INDEPENDENT ADMIN MENU
 // ==========================================
 add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu' );
 function cmp_standalone_admin_tools_menu() {
@@ -48,11 +48,11 @@ function cmp_standalone_admin_tools_menu() {
 }
 
 // ==========================================
-// 2. CSV TEMPLATE DOWNLOADER (AVAILABLE FRONT & BACK)
+// 2. CSV TEMPLATE DOWNLOADER
 // ==========================================
-add_action( 'init', 'cmp_download_csv_template' ); // Changed to init so frontend portals can trigger it
+add_action( 'admin_init', 'cmp_download_csv_template' );
 function cmp_download_csv_template() {
-    if ( isset( $_GET['cmp_download_template'] ) && (current_user_can( 'manage_options' ) || current_user_can( 'menu_manager' )) ) {
+    if ( isset( $_GET['cmp_download_template'] ) && current_user_can( 'manage_options' ) ) {
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="Meal_Plan_Bulk_Import_Template.csv"');
         $output = fopen('php://output', 'w');
@@ -70,7 +70,7 @@ function cmp_download_csv_template() {
 }
 
 // ==========================================
-// 3. BACKEND: SUBSCRIBER IMPORT TOOL 
+// 3. SUBSCRIBER IMPORT TOOL (MANUAL & BULK CSV)
 // ==========================================
 function cmp_standalone_render_manual_import() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
@@ -189,12 +189,18 @@ function cmp_standalone_render_manual_import() {
         $last_name      = sanitize_text_field($_POST['last_name']);
         $phone          = sanitize_text_field($_POST['phone']);
         $plan_name      = sanitize_text_field($_POST['plan_name']);
+        $recipient_name = sanitize_text_field($_POST['recipient_name'] ?? '');
         $remaining_days = intval($_POST['remaining_days']);
         $method         = sanitize_text_field($_POST['delivery_method']);
         $timing         = sanitize_text_field($_POST['delivery_timing']);
         $time_slot      = sanitize_text_field($_POST['time_slot']);
         $address        = sanitize_text_field($_POST['address']);
         $allergies      = sanitize_textarea_field($_POST['allergies']);
+
+        // Append Recipient Name if Provided
+        if (!empty($recipient_name)) {
+            $plan_name .= ' - ' . $recipient_name;
+        }
 
         if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
             $message = '<div class="notice notice-error"><p>Error: Email, Plan Name, and Remaining Days are strictly required.</p></div>';
@@ -257,10 +263,10 @@ function cmp_standalone_render_manual_import() {
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04); margin-bottom: 30px;">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
                 <h2 style="margin: 0; color: #1d6f42;">Bulk CSV Import</h2>
-                <a href="<?php echo admin_url('admin-ajax.php?action=cmp_download_template'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
+                <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
             </div>
             
-            <p style="color: #666; margin-bottom: 20px;">Download the template above, fill it out strictly matching the column headers, and upload it here to import dozens of customers at once.</p>
+            <p style="color: #666; margin-bottom: 20px;">Download the template above, fill it out strictly matching the column headers, and upload it here to import dozens of customers at once. <em>(Note: To assign a family member, just append their name in the Plan Name column, e.g., "2 Meal Plan - Sarah").</em></p>
             
             <form method="POST" action="" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px; background: #f8f9fa; padding: 15px; border: 1px dashed #ccc; border-radius: 4px;">
                 <?php wp_nonce_field( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ); ?>
@@ -348,12 +354,14 @@ function cmp_standalone_render_manual_import() {
                             <option value="3 Meal Plan (Manual)">3 Meal Plan</option>
                             <option value="Juice Cleanse (Manual)">Juice Cleanse</option>
                         </select>
-                        <p class="description">This determines their daily limits in the Customer Portal.</p>
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Recipient Name (Optional)</label>
+                        <input type="text" name="recipient_name" style="width: 100%; padding: 6px;" placeholder="e.g. Sarah">
                     </div>
                     <div style="flex: 1;">
                         <label style="font-weight: bold; display: block; margin-bottom: 5px;">Remaining Days *</label>
                         <input type="number" name="remaining_days" required min="1" max="100" style="width: 100%; padding: 6px;" placeholder="e.g. 14">
-                        <p class="description" style="color:#d63638; font-weight:bold;">If they had a 24-day plan but already ate 10 days, enter 14 here.</p>
                     </div>
                 </div>
 
@@ -365,7 +373,7 @@ function cmp_standalone_render_manual_import() {
 }
 
 // ==========================================
-// 4. BACKEND: DATABASE CLEANUP TOOL
+// 4. DATABASE CLEANUP TOOL
 // ==========================================
 function cmp_standalone_render_cleanup() {
     if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
@@ -523,12 +531,18 @@ function cmp_render_frontend_admin_tools() {
         $last_name      = sanitize_text_field($_POST['last_name']);
         $phone          = sanitize_text_field($_POST['phone']);
         $plan_name      = sanitize_text_field($_POST['plan_name']);
+        $recipient_name = sanitize_text_field($_POST['recipient_name'] ?? '');
         $remaining_days = intval($_POST['remaining_days']);
         $method         = sanitize_text_field($_POST['delivery_method']);
         $timing         = sanitize_text_field($_POST['delivery_timing']);
         $time_slot      = sanitize_text_field($_POST['time_slot']);
         $address        = sanitize_text_field($_POST['address']);
         $allergies      = sanitize_textarea_field($_POST['allergies']);
+
+        // Append Recipient Name if Provided
+        if (!empty($recipient_name)) {
+            $plan_name .= ' - ' . $recipient_name;
+        }
 
         if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
             $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Error: Email, Plan, and Days are required.</div>';
@@ -630,7 +644,7 @@ function cmp_render_frontend_admin_tools() {
                     <h3 style="margin: 0; color: #047857;">Bulk CSV Import</h3>
                     <a href="?cmp_download_template=1" style="background: #10b981; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.9em;">Download CSV Template</a>
                 </div>
-                <p style="color: #64748b; margin-bottom: 20px;">Download the template above, fill it out exactly as formatted, and upload it here to import multiple customers.</p>
+                <p style="color: #64748b; margin-bottom: 20px;">Download the template above, fill it out exactly as formatted, and upload it here to import multiple customers. <em>(Note: To assign a family member, just append their name in the Plan Name column, e.g., "2 Meal Plan - Sarah").</em></p>
                 <form method="POST" enctype="multipart/form-data" style="display: flex; gap: 15px; align-items: center;">
                     <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
                     <input type="file" name="csv_file" accept=".csv" required style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; flex-grow: 1;">
@@ -694,6 +708,11 @@ function cmp_render_frontend_admin_tools() {
                                 <option value="3 Meal Plan (Manual)">3 Meal Plan</option>
                                 <option value="Juice Cleanse (Manual)">Juice Cleanse</option>
                             </select>
+                        </div>
+                        <div style="flex:1;">
+                            <label class="tools-label">Recipient Name</label>
+                            <input type="text" name="recipient_name" class="tools-input" placeholder="e.g. Sarah">
+                            <span style="font-size: 0.85em; color: #64748b;">(Optional) For family members sharing an email.</span>
                         </div>
                         <div style="flex:1;">
                             <label class="tools-label">Remaining Days *</label>
