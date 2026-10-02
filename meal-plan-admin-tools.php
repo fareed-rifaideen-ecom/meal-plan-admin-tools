@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.4
+ * Version: 1.5
  * Author: Fareed M Rifaideen
  */
 
@@ -339,7 +339,7 @@ function cmp_standalone_render_manual_import() {
 
                 <div style="margin-bottom: 20px;">
                     <label style="font-weight: bold; display: block; margin-bottom: 5px;">Allergies</label>
-                    <input type="text" name="allergies" placeholder="e.g., Nuts, Shellfish" style="width: 100%; padding: 6px;">
+                    <input type="text" name="allergies" placeholder="e.g., Nuts, Shellfish (Leave blank if none)" style="width: 100%; padding: 6px;">
                 </div>
 
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 25px 0;">
@@ -440,25 +440,45 @@ function cmp_standalone_render_deposit_manager() {
 
     global $wpdb;
     $message = '';
+    $found_users = array();
 
     if(isset($_POST['cmp_toggle_deposit']) && check_admin_referer('cmp_deposit_action', 'cmp_deposit_nonce')) {
         $user_id = intval($_POST['user_id']);
         $new_status = sanitize_text_field($_POST['new_status']);
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
         $message = '<div class="notice notice-success"><p>Deposit status updated successfully.</p></div>';
+        
+        // Re-load the specific user to instantly show their updated card
+        $found_users[] = get_userdata($user_id);
     }
 
-    $raw_query = isset($_POST['search_email']) ? sanitize_text_field($_POST['search_email']) : '';
-    $searched_user = null;
+    $raw_query = isset($_POST['search_term']) ? sanitize_text_field($_POST['search_term']) : '';
 
-    if(!empty($raw_query)) {
-        $clean_email = sanitize_email($raw_query);
-        $searched_user = $clean_email ? get_user_by('email', $clean_email) : null;
-        if (!$searched_user) {
-            $searched_user = get_user_by('login', $raw_query);
+    if(!empty($raw_query) && isset($_POST['cmp_search_user'])) {
+        // 1. Broad Search (Email, Username, Nicename)
+        $user_query = new WP_User_Query( array(
+            'search'         => '*' . $raw_query . '*',
+            'search_columns' => array( 'user_login', 'user_email', 'user_nicename', 'display_name' ),
+            'number'         => 20
+        ));
+        $found_users = $user_query->get_results();
+
+        // 2. Fallback Meta Search (First Name, Last Name, Phone) if standard search misses
+        if (empty($found_users)) {
+            $meta_query = new WP_User_Query( array(
+                'meta_query' => array(
+                    'relation' => 'OR',
+                    array( 'key' => 'first_name', 'value' => $raw_query, 'compare' => 'LIKE' ),
+                    array( 'key' => 'last_name', 'value' => $raw_query, 'compare' => 'LIKE' ),
+                    array( 'key' => 'billing_phone', 'value' => $raw_query, 'compare' => 'LIKE' )
+                ),
+                'number' => 20
+            ));
+            $found_users = $meta_query->get_results();
         }
-        if (!$searched_user && isset($_POST['cmp_search_user'])) {
-            $message = '<div class="notice notice-error"><p>No customer found with that email or username.</p></div>';
+
+        if (empty($found_users)) {
+            $message = '<div class="notice notice-error"><p>No customer found matching "'.esc_html($raw_query)+'".</p></div>';
         }
     }
 
@@ -467,24 +487,28 @@ function cmp_standalone_render_deposit_manager() {
         <h1 style="margin-bottom: 20px;">Customer Deposit Wallet</h1>
         <?php echo $message; ?>
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
-            <p style="color: #666; margin-bottom: 20px;">Search by email to view or refund a customer's AED 150 Thermal Bag Deposit. Marking as refunded ensures the deposit is automatically charged again on their next checkout renewal.</p>
+            <p style="color: #666; margin-bottom: 20px;">Search by Name, Email, or Phone to view or refund a customer's AED 150 Thermal Bag Deposit. Marking as refunded ensures the deposit is automatically charged again on their next checkout renewal.</p>
             
             <form method="POST" style="display: flex; gap: 15px; margin-bottom: 30px;">
-                <input type="text" name="search_email" placeholder="Customer Email Address" value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
+                <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
                 <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b; font-weight: bold;">Search Customer</button>
             </form>
 
-            <?php if ($searched_user): 
-                $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                if ($deposit_held === '') {
-                    $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
-                    $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
-                }
-                $is_held = ($deposit_held === 'yes');
+            <?php if (!empty($found_users)): 
+                foreach ($found_users as $searched_user):
+                    $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
+                    if ($deposit_held === '') {
+                        $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                        $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                    }
+                    $is_held = ($deposit_held === 'yes');
             ?>
-            <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $is_held ? '#10b981' : '#dc2626'; ?>;">
+            <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $is_held ? '#10b981' : '#dc2626'; ?>; margin-bottom: 15px;">
                 <h3 style="margin-top: 0; font-size: 1.3em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h3>
                 <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Email:</strong> <?php echo esc_html($searched_user->user_email); ?></p>
+                <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
+                    <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Phone:</strong> <?php echo esc_html($phone); ?></p>
+                <?php endif; ?>
                 <p style="font-size: 1em; margin-bottom: 20px;"><strong>Status:</strong> 
                     <?php if($is_held): ?>
                         <span style="color: #10b981; font-weight: bold; background: #dcfce7; padding: 4px 10px; border-radius: 4px;">Deposit Held (Waived at Checkout)</span>
@@ -495,7 +519,6 @@ function cmp_standalone_render_deposit_manager() {
                 
                 <form method="POST" style="margin-top: 15px;">
                     <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
-                    <input type="hidden" name="search_email" value="<?php echo esc_attr($raw_query); ?>">
                     <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
                     <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
                     <button type="submit" name="cmp_toggle_deposit" class="button" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: #fff; border: none; padding: 6px 18px; font-weight: bold; cursor: pointer;">
@@ -503,7 +526,7 @@ function cmp_standalone_render_deposit_manager() {
                     </button>
                 </form>
             </div>
-            <?php endif; ?>
+            <?php endforeach; endif; ?>
         </div>
     </div>
     <?php
@@ -689,19 +712,37 @@ function cmp_render_frontend_admin_tools() {
     }
 
     // D. Deposit Manager
-    $searched_user = null;
+    $found_users = array();
     $raw_query = '';
     
     if ( isset( $_POST['cmp_frontend_search_deposit'] ) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit') ) {
         $active_tab = 'tab-deposit';
-        $raw_query  = sanitize_text_field($_POST['search_email']);
-        $clean_email = sanitize_email($raw_query);
-        $searched_user = $clean_email ? get_user_by('email', $clean_email) : null;
-        if (!$searched_user) {
-            $searched_user = get_user_by('login', $raw_query);
+        $raw_query  = sanitize_text_field($_POST['search_term']);
+        
+        // 1. Broad Search (Email, Username, Nicename)
+        $user_query = new WP_User_Query( array(
+            'search'         => '*' . $raw_query . '*',
+            'search_columns' => array( 'user_login', 'user_email', 'user_nicename', 'display_name' ),
+            'number'         => 20
+        ));
+        $found_users = $user_query->get_results();
+
+        // 2. Fallback Meta Search (First Name, Last Name, Phone)
+        if (empty($found_users)) {
+            $meta_query = new WP_User_Query( array(
+                'meta_query' => array(
+                    'relation' => 'OR',
+                    array( 'key' => 'first_name', 'value' => $raw_query, 'compare' => 'LIKE' ),
+                    array( 'key' => 'last_name', 'value' => $raw_query, 'compare' => 'LIKE' ),
+                    array( 'key' => 'billing_phone', 'value' => $raw_query, 'compare' => 'LIKE' )
+                ),
+                'number' => 20
+            ));
+            $found_users = $meta_query->get_results();
         }
-        if (!$searched_user) {
-            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found with that email or username.</div>';
+
+        if (empty($found_users)) {
+            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found matching "'.esc_html($raw_query)+'".</div>';
         }
     }
 
@@ -712,8 +753,8 @@ function cmp_render_frontend_admin_tools() {
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
         $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deposit wallet status updated.</div>';
         
-        $searched_user = get_userdata($user_id);
-        $raw_query     = $searched_user->user_email;
+        // Re-load the specific user to instantly show their updated card
+        $found_users[] = get_userdata($user_id);
     }
 
     ob_start();
@@ -871,32 +912,36 @@ function cmp_render_frontend_admin_tools() {
             <?php echo $deposit_message; ?>
             <div class="tools-card" style="border-left: 4px solid #f59e0b;">
                 <h3 style="margin-top: 0; color: #b45309; border-bottom: 1px solid #eee; padding-bottom: 15px;">Customer Deposit Wallet</h3>
-                <p style="color: #64748b; margin-bottom: 25px;">Search for a customer by email or username to audit their AED 150 Thermal Bag Deposit status. Marking as refunded ensures the deposit is charged again on their next renewal.</p>
+                <p style="color: #64748b; margin-bottom: 25px;">Search for a customer by name, email, or phone number to audit their AED 150 Thermal Bag Deposit status. Marking as refunded ensures the deposit is charged again on their next renewal.</p>
                 
                 <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px;">
                     <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                    <input type="text" name="search_email" placeholder="Customer Email Address or Username" value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                    <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
                     <button type="submit" name="cmp_frontend_search_deposit" style="background: #f59e0b; color: white; border: none; padding: 10px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Search Customer</button>
                 </form>
 
-                <?php if ($searched_user): 
-                    $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                    if ($deposit_held === '') {
-                        $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
-                        $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
-                    }
-                    $is_held = ($deposit_held === 'yes');
+                <?php if (!empty($found_users)): 
+                    foreach ($found_users as $searched_user):
+                        $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
+                        if ($deposit_held === '') {
+                            $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                            $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                        }
+                        $is_held = ($deposit_held === 'yes');
                 ?>
-                <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 6px;">
+                <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 15px;">
                     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
                         <div>
                             <h4 style="margin: 0 0 5px 0; color: #0f172a; font-size: 1.1em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h4>
                             <p style="margin: 0; color: #64748b;"><?php echo esc_html($searched_user->user_email); ?></p>
+                            <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
+                                <p style="margin: 0; color: #64748b; font-size: 0.9em; margin-top: 3px;">Phone: <?php echo esc_html($phone); ?></p>
+                            <?php endif; ?>
                         </div>
                         <div>
                             <form method="POST" style="margin: 0;">
                                 <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                                <input type="hidden" name="search_email" value="<?php echo esc_attr($raw_query); ?>">
+                                <input type="hidden" name="search_term" value="<?php echo esc_attr($raw_query); ?>">
                                 <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
                                 <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
                                 <button type="submit" name="cmp_frontend_toggle_deposit" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s;">
@@ -914,7 +959,7 @@ function cmp_render_frontend_admin_tools() {
                         <?php endif; ?>
                     </div>
                 </div>
-                <?php endif; ?>
+                <?php endforeach; endif; ?>
 
             </div>
         </div>
