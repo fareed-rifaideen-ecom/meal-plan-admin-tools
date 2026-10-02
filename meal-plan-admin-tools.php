@@ -579,7 +579,7 @@ function cmp_standalone_render_deposit_manager() {
                     </thead>
                     <tbody>
                         <?php foreach ($active_links as $token => $data): 
-                            $checkout_url = site_url('/meal-plan-checkout/?vip_token=' . $token);
+                            $checkout_url = site_url('/?vip_token=' . $token);
                         ?>
                         <tr>
                             <td style="padding: 8px;">
@@ -1084,7 +1084,7 @@ function cmp_render_frontend_admin_tools() {
                         </thead>
                         <tbody>
                             <?php foreach ($active_links as $token => $data): 
-                                $checkout_url = site_url('/meal-plan-checkout/?vip_token=' . $token);
+                                $checkout_url = site_url('/?vip_token=' . $token);
                             ?>
                             <tr>
                                 <td style="padding: 8px;">
