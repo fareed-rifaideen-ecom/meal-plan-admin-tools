@@ -442,20 +442,41 @@ function cmp_standalone_render_deposit_manager() {
     $message = '';
     $found_users = array();
 
+    // -- HANDLE MAGIC LINK ACTIONS (BACKEND) --
+    if (isset($_POST['cmp_generate_magic_link']) && check_admin_referer('cmp_deposit_action', 'cmp_deposit_nonce')) {
+        $links = get_option('cmp_active_magic_links', array());
+        $token = substr(str_shuffle('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 8);
+        $links[$token] = array(
+            'date' => current_time('mysql'),
+            'by'   => wp_get_current_user()->display_name
+        );
+        update_option('cmp_active_magic_links', $links);
+        $message = '<div class="notice notice-success"><p>Magic link generated successfully.</p></div>';
+    }
+
+    if (isset($_POST['cmp_revoke_magic_link']) && check_admin_referer('cmp_deposit_action', 'cmp_deposit_nonce')) {
+        $token_to_revoke = sanitize_text_field($_POST['revoke_token']);
+        $links = get_option('cmp_active_magic_links', array());
+        if (isset($links[$token_to_revoke])) {
+            unset($links[$token_to_revoke]);
+            update_option('cmp_active_magic_links', $links);
+            $message = '<div class="notice notice-success"><p>Magic link revoked successfully.</p></div>';
+        }
+    }
+
+    // -- HANDLE DEPOSIT WALLET STATUS UPDATE --
     if(isset($_POST['cmp_toggle_deposit']) && check_admin_referer('cmp_deposit_action', 'cmp_deposit_nonce')) {
         $user_id = intval($_POST['user_id']);
-        $new_status = sanitize_text_field($_POST['new_status']);
+        $new_status = sanitize_text_field($_POST['new_status']); // 'yes', 'no', or 'own_bag'
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
         $message = '<div class="notice notice-success"><p>Deposit status updated successfully.</p></div>';
         
-        // Re-load the specific user to instantly show their updated card
         $found_users[] = get_userdata($user_id);
     }
 
     $raw_query = isset($_POST['search_term']) ? sanitize_text_field($_POST['search_term']) : '';
 
     if(!empty($raw_query) && isset($_POST['cmp_search_user'])) {
-        // 1. Broad Search (Email, Username, Nicename)
         $user_query = new WP_User_Query( array(
             'search'         => '*' . $raw_query . '*',
             'search_columns' => array( 'user_login', 'user_email', 'user_nicename', 'display_name' ),
@@ -463,7 +484,6 @@ function cmp_standalone_render_deposit_manager() {
         ));
         $found_users = $user_query->get_results();
 
-        // 2. Fallback Meta Search (First Name, Last Name, Phone) if standard search misses
         if (empty($found_users)) {
             $meta_query = new WP_User_Query( array(
                 'meta_query' => array(
@@ -478,7 +498,7 @@ function cmp_standalone_render_deposit_manager() {
         }
 
         if (empty($found_users)) {
-            $message = '<div class="notice notice-error"><p>No customer found matching "'.esc_html($raw_query)+'".</p></div>';
+            $message = '<div class="notice notice-error"><p>No customer found matching "'.esc_html($raw_query).' ".</p></div>';
         }
     }
 
@@ -486,47 +506,102 @@ function cmp_standalone_render_deposit_manager() {
     <div class="wrap">
         <h1 style="margin-bottom: 20px;">Customer Deposit Wallet</h1>
         <?php echo $message; ?>
-        <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
-            <p style="color: #666; margin-bottom: 20px;">Search by Name, Email, or Phone to view or refund a customer's AED 150 Thermal Bag Deposit. Marking as refunded ensures the deposit is automatically charged again on their next checkout renewal.</p>
+        
+        <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
             
-            <form method="POST" style="display: flex; gap: 15px; margin-bottom: 30px;">
-                <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
-                <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b; font-weight: bold;">Search Customer</button>
-            </form>
-
-            <?php if (!empty($found_users)): 
-                foreach ($found_users as $searched_user):
-                    $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                    if ($deposit_held === '') {
-                        $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
-                        $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
-                    }
-                    $is_held = ($deposit_held === 'yes');
-            ?>
-            <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $is_held ? '#10b981' : '#dc2626'; ?>; margin-bottom: 15px;">
-                <h3 style="margin-top: 0; font-size: 1.3em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h3>
-                <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Email:</strong> <?php echo esc_html($searched_user->user_email); ?></p>
-                <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
-                    <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Phone:</strong> <?php echo esc_html($phone); ?></p>
-                <?php endif; ?>
-                <p style="font-size: 1em; margin-bottom: 20px;"><strong>Status:</strong> 
-                    <?php if($is_held): ?>
-                        <span style="color: #10b981; font-weight: bold; background: #dcfce7; padding: 4px 10px; border-radius: 4px;">Deposit Held (Waived at Checkout)</span>
-                    <?php else: ?>
-                        <span style="color: #dc2626; font-weight: bold; background: #fee2e2; padding: 4px 10px; border-radius: 4px;">Refunded / No Deposit (Charge AED 150)</span>
-                    <?php endif; ?>
-                </p>
+            <!-- LEFT COLUMN: SEARCH & UPDATE -->
+            <div style="flex: 2; min-width: 400px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
+                <p style="color: #666; margin-bottom: 20px;">Search by Name, Email, or Phone to view or update a customer's Bag Deposit Wallet.</p>
                 
-                <form method="POST" style="margin-top: 15px;">
-                    <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
-                    <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
-                    <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
-                    <button type="submit" name="cmp_toggle_deposit" class="button" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: #fff; border: none; padding: 6px 18px; font-weight: bold; cursor: pointer;">
-                        <?php echo $is_held ? 'Mark as Refunded (Charge Deposit Next Time)' : 'Mark as Held (Waive Deposit Next Time)'; ?>
-                    </button>
+                <form method="POST" style="display: flex; gap: 15px; margin-bottom: 30px;">
+                    <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
+                    <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b; font-weight: bold;">Search Customer</button>
                 </form>
+
+                <?php if (!empty($found_users)): 
+                    foreach ($found_users as $searched_user):
+                        $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
+                        if ($deposit_held === '') {
+                            $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                            $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                        }
+                        
+                        $status_color = '#dc2626'; $status_bg = '#fee2e2'; $status_text = 'Refunded / No Deposit (Charge AED 150)';
+                        if ($deposit_held === 'yes') { $status_color = '#10b981'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
+                        if ($deposit_held === 'own_bag') { $status_color = '#8b5cf6'; $status_bg = '#ede9fe'; $status_text = "Customer's Own Bag (Waived)"; }
+                ?>
+                <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $status_color; ?>; margin-bottom: 15px;">
+                    <h3 style="margin-top: 0; font-size: 1.3em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h3>
+                    <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Email:</strong> <?php echo esc_html($searched_user->user_email); ?></p>
+                    <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
+                        <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Phone:</strong> <?php echo esc_html($phone); ?></p>
+                    <?php endif; ?>
+                    <p style="font-size: 1em; margin-bottom: 20px;"><strong>Status:</strong> 
+                        <span style="color: <?php echo $status_color; ?>; font-weight: bold; background: <?php echo $status_bg; ?>; padding: 4px 10px; border-radius: 4px;"><?php echo $status_text; ?></span>
+                    </p>
+                    
+                    <form method="POST" style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
+                        <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
+                        <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
+                        <select name="new_status" style="padding: 6px; border-radius: 4px;">
+                            <option value="yes" <?php selected($deposit_held, 'yes'); ?>>Deposit Held</option>
+                            <option value="own_bag" <?php selected($deposit_held, 'own_bag'); ?>>Customer's Own Bag</option>
+                            <option value="no" <?php selected($deposit_held, 'no'); ?>>Refunded / No Deposit</option>
+                        </select>
+                        <button type="submit" name="cmp_toggle_deposit" class="button" style="background: #334155; color: #fff; border: none; font-weight: bold; cursor: pointer;">
+                            Update Wallet
+                        </button>
+                    </form>
+                </div>
+                <?php endforeach; endif; ?>
             </div>
-            <?php endforeach; endif; ?>
+            
+            <!-- RIGHT COLUMN: MAGIC LINKS -->
+            <div style="flex: 1; min-width: 300px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-top: 4px solid #8b5cf6;">
+                <h3 style="margin-top: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
+                <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">Generate secure, single-use checkout links that automatically waive the AED 150 deposit and tag the new customer as "Own Bag". The link auto-destroys once the order is placed.</p>
+                
+                <form method="POST" style="margin-bottom: 25px;">
+                    <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
+                    <button type="submit" name="cmp_generate_magic_link" class="button button-primary" style="background: #7c3aed; border-color: #7c3aed; font-weight: bold; width: 100%;">+ Generate New Link</button>
+                </form>
+
+                <?php 
+                $active_links = get_option('cmp_active_magic_links', array());
+                if (!empty($active_links)): 
+                ?>
+                <table class="wp-list-table widefat fixed striped" style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <thead>
+                        <tr>
+                            <th style="padding: 8px;">Active Link URL</th>
+                            <th style="padding: 8px; width: 70px;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($active_links as $token => $data): 
+                            $checkout_url = site_url('/meal-plan-checkout/?vip_token=' . $token);
+                        ?>
+                        <tr>
+                            <td style="padding: 8px;">
+                                <input type="text" value="<?php echo esc_attr($checkout_url); ?>" readonly style="width: 100%; padding: 6px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85em; cursor: copy;" onclick="this.select(); document.execCommand('copy'); alert('Link copied to clipboard!');">
+                                <div style="font-size: 0.8em; color: #94a3b8; margin-top: 3px;">Created by: <?php echo esc_html($data['by']); ?></div>
+                            </td>
+                            <td style="padding: 8px; vertical-align: middle;">
+                                <form method="POST" style="margin: 0;">
+                                    <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
+                                    <input type="hidden" name="revoke_token" value="<?php echo esc_attr($token); ?>">
+                                    <button type="submit" name="cmp_revoke_magic_link" style="background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold;">Revoke</button>
+                                </form>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php else: ?>
+                    <p style="color: #94a3b8; font-style: italic; text-align: center;">No active links.</p>
+                <?php endif; ?>
+            </div>
+            
         </div>
     </div>
     <?php
@@ -714,12 +789,36 @@ function cmp_render_frontend_admin_tools() {
     // D. Deposit Manager
     $found_users = array();
     $raw_query = '';
+
+    // -- HANDLE MAGIC LINK ACTIONS (FRONTEND) --
+    if (isset($_POST['cmp_frontend_generate_magic_link']) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit')) {
+        $active_tab = 'tab-deposit';
+        $links = get_option('cmp_active_magic_links', array());
+        $token = substr(str_shuffle('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'), 0, 8);
+        $links[$token] = array(
+            'date' => current_time('mysql'),
+            'by'   => wp_get_current_user()->display_name
+        );
+        update_option('cmp_active_magic_links', $links);
+        $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Magic link generated successfully.</div>';
+    }
+
+    if (isset($_POST['cmp_frontend_revoke_magic_link']) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit')) {
+        $active_tab = 'tab-deposit';
+        $token_to_revoke = sanitize_text_field($_POST['revoke_token']);
+        $links = get_option('cmp_active_magic_links', array());
+        if (isset($links[$token_to_revoke])) {
+            unset($links[$token_to_revoke]);
+            update_option('cmp_active_magic_links', $links);
+            $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Magic link revoked.</div>';
+        }
+    }
     
+    // -- HANDLE CUSTOMER SEARCH --
     if ( isset( $_POST['cmp_frontend_search_deposit'] ) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit') ) {
         $active_tab = 'tab-deposit';
         $raw_query  = sanitize_text_field($_POST['search_term']);
         
-        // 1. Broad Search (Email, Username, Nicename)
         $user_query = new WP_User_Query( array(
             'search'         => '*' . $raw_query . '*',
             'search_columns' => array( 'user_login', 'user_email', 'user_nicename', 'display_name' ),
@@ -727,7 +826,6 @@ function cmp_render_frontend_admin_tools() {
         ));
         $found_users = $user_query->get_results();
 
-        // 2. Fallback Meta Search (First Name, Last Name, Phone)
         if (empty($found_users)) {
             $meta_query = new WP_User_Query( array(
                 'meta_query' => array(
@@ -742,10 +840,11 @@ function cmp_render_frontend_admin_tools() {
         }
 
         if (empty($found_users)) {
-            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found matching "'.esc_html($raw_query)+'".</div>';
+            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found matching "'.esc_html($raw_query).' ".</div>';
         }
     }
 
+    // -- HANDLE DEPOSIT STATUS TOGGLE --
     if ( isset( $_POST['cmp_frontend_toggle_deposit'] ) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit') ) {
         $active_tab = 'tab-deposit';
         $user_id    = intval($_POST['user_id']);
@@ -753,7 +852,6 @@ function cmp_render_frontend_admin_tools() {
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
         $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deposit wallet status updated.</div>';
         
-        // Re-load the specific user to instantly show their updated card
         $found_users[] = get_userdata($user_id);
     }
 
@@ -910,58 +1008,106 @@ function cmp_render_frontend_admin_tools() {
         <!-- TAB 3: DEPOSIT MANAGER -->
         <div id="tab-deposit" class="tools-content <?php echo $active_tab == 'tab-deposit' ? 'active' : ''; ?>">
             <?php echo $deposit_message; ?>
-            <div class="tools-card" style="border-left: 4px solid #f59e0b;">
-                <h3 style="margin-top: 0; color: #b45309; border-bottom: 1px solid #eee; padding-bottom: 15px;">Customer Deposit Wallet</h3>
-                <p style="color: #64748b; margin-bottom: 25px;">Search for a customer by name, email, or phone number to audit their AED 150 Thermal Bag Deposit status. Marking as refunded ensures the deposit is charged again on their next renewal.</p>
+            
+            <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
                 
-                <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px;">
-                    <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                    <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
-                    <button type="submit" name="cmp_frontend_search_deposit" style="background: #f59e0b; color: white; border: none; padding: 10px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Search Customer</button>
-                </form>
+                <!-- LEFT COLUMN: SEARCH & UPDATE -->
+                <div style="flex: 2; min-width: 400px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
+                    <p style="color: #64748b; margin-bottom: 20px;">Search by Name, Email, or Phone to view or update a customer's Bag Deposit Wallet.</p>
+                    
+                    <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px;">
+                        <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
+                        <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        <button type="submit" name="cmp_frontend_search_deposit" style="background: #f59e0b; color: white; border: none; padding: 10px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Search Customer</button>
+                    </form>
 
-                <?php if (!empty($found_users)): 
-                    foreach ($found_users as $searched_user):
-                        $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                        if ($deposit_held === '') {
-                            $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
-                            $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
-                        }
-                        $is_held = ($deposit_held === 'yes');
-                ?>
-                <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 15px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-                        <div>
-                            <h4 style="margin: 0 0 5px 0; color: #0f172a; font-size: 1.1em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h4>
-                            <p style="margin: 0; color: #64748b;"><?php echo esc_html($searched_user->user_email); ?></p>
-                            <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
-                                <p style="margin: 0; color: #64748b; font-size: 0.9em; margin-top: 3px;">Phone: <?php echo esc_html($phone); ?></p>
-                            <?php endif; ?>
-                        </div>
-                        <div>
-                            <form method="POST" style="margin: 0;">
-                                <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                                <input type="hidden" name="search_term" value="<?php echo esc_attr($raw_query); ?>">
-                                <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
-                                <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
-                                <button type="submit" name="cmp_frontend_toggle_deposit" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s;">
-                                    <?php echo $is_held ? 'Mark as Refunded (Charge Next Time)' : 'Mark as Held (Waive Next Time)'; ?>
-                                </button>
-                            </form>
-                        </div>
-                    </div>
-                    <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #cbd5e1;">
-                        <span style="font-weight: bold; color: #334155;">Current Status: </span>
-                        <?php if($is_held): ?>
-                            <span style="background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Bag Deposit Held (Waived)</span>
-                        <?php else: ?>
-                            <span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Refunded / No Deposit (Will Charge AED 150)</span>
+                    <?php if (!empty($found_users)): 
+                        foreach ($found_users as $searched_user):
+                            $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
+                            if ($deposit_held === '') {
+                                $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                                $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                            }
+                            
+                            $status_color = '#dc2626'; $status_bg = '#fee2e2'; $status_text = 'Refunded / No Deposit (Charge AED 150)';
+                            if ($deposit_held === 'yes') { $status_color = '#10b981'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
+                            if ($deposit_held === 'own_bag') { $status_color = '#8b5cf6'; $status_bg = '#ede9fe'; $status_text = "Customer's Own Bag (Waived)"; }
+                    ?>
+                    <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-left: 4px solid <?php echo $status_color; ?>; border-radius: 6px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 5px 0; color: #0f172a; font-size: 1.2em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h4>
+                        <p style="margin: 0 0 5px 0; color: #64748b;"><?php echo esc_html($searched_user->user_email); ?></p>
+                        <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
+                            <p style="margin: 0 0 15px 0; color: #64748b; font-size: 0.9em;">Phone: <?php echo esc_html($phone); ?></p>
                         <?php endif; ?>
+                        
+                        <p style="font-size: 1em; margin-bottom: 15px;"><strong>Status:</strong> 
+                            <span style="color: <?php echo $status_color; ?>; font-weight: bold; background: <?php echo $status_bg; ?>; padding: 4px 10px; border-radius: 4px; font-size: 0.9em;"><?php echo $status_text; ?></span>
+                        </p>
+                        
+                        <form method="POST" style="margin: 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                            <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
+                            <input type="hidden" name="search_term" value="<?php echo esc_attr($raw_query); ?>">
+                            <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
+                            <select name="new_status" style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                                <option value="yes" <?php selected($deposit_held, 'yes'); ?>>Deposit Held</option>
+                                <option value="own_bag" <?php selected($deposit_held, 'own_bag'); ?>>Customer's Own Bag</option>
+                                <option value="no" <?php selected($deposit_held, 'no'); ?>>Refunded / No Deposit</option>
+                            </select>
+                            <button type="submit" name="cmp_frontend_toggle_deposit" class="button" style="background: #334155; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">
+                                Update Wallet
+                            </button>
+                        </form>
                     </div>
+                    <?php endforeach; endif; ?>
                 </div>
-                <?php endforeach; endif; ?>
+                
+                <!-- RIGHT COLUMN: MAGIC LINKS -->
+                <div style="flex: 1; min-width: 300px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-top: 4px solid #8b5cf6;">
+                    <h3 style="margin-top: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
+                    <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">Generate secure, single-use checkout links that automatically waive the AED 150 deposit and tag the new customer as "Own Bag". The link auto-destroys once the order is placed.</p>
+                    
+                    <form method="POST" style="margin-bottom: 25px;">
+                        <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
+                        <button type="submit" name="cmp_frontend_generate_magic_link" class="button button-primary" style="background: #7c3aed; border-color: #7c3aed; font-weight: bold; width: 100%;">+ Generate New Link</button>
+                    </form>
 
+                    <?php 
+                    $active_links = get_option('cmp_active_magic_links', array());
+                    if (!empty($active_links)): 
+                    ?>
+                    <table class="wp-list-table widefat fixed striped" style="width: 100%; border-collapse: collapse; text-align: left;">
+                        <thead>
+                            <tr>
+                                <th style="padding: 8px;">Active Link URL</th>
+                                <th style="padding: 8px; width: 70px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($active_links as $token => $data): 
+                                $checkout_url = site_url('/meal-plan-checkout/?vip_token=' . $token);
+                            ?>
+                            <tr>
+                                <td style="padding: 8px;">
+                                    <input type="text" value="<?php echo esc_attr($checkout_url); ?>" readonly style="width: 100%; padding: 6px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 0.85em; cursor: copy;" onclick="this.select(); document.execCommand('copy'); alert('Link copied to clipboard!');">
+                                    <div style="font-size: 0.8em; color: #94a3b8; margin-top: 3px;">Created by: <?php echo esc_html($data['by']); ?></div>
+                                </td>
+                                <td style="padding: 8px; vertical-align: middle;">
+                                    <form method="POST" style="margin: 0;">
+                                        <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
+                                        <input type="hidden" name="revoke_token" value="<?php echo esc_attr($token); ?>">
+                                        <button type="submit" name="cmp_frontend_revoke_magic_link" style="background: #ef4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold;">Revoke</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <?php else: ?>
+                        <p style="color: #94a3b8; font-style: italic; text-align: center;">No active links.</p>
+                    <?php endif; ?>
+                </div>
             </div>
+
         </div>
 
     </div>
