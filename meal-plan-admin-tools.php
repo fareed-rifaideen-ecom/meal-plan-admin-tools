@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.3
+ * Version: 1.4
  * Author: Fareed M Rifaideen
  */
 
@@ -12,31 +12,31 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 // ==========================================
 // 1. REGISTER INDEPENDENT ADMIN MENU
 // ==========================================
-add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu' );
+add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu', 60 );
 function cmp_standalone_admin_tools_menu() {
     
-    // Create a brand new Top-Level Menu to completely avoid slug/loading conflicts
+    // Top-Level Menu (Accessible by Admin, Menu Manager & Accounts Team)
     add_menu_page(
         'Meal Admin Tools',
         'Meal Admin Tools',
-        'manage_options',
+        'read',
         'cmp-admin-tools',
         'cmp_standalone_render_manual_import',
-        'dashicons-admin-tools', // Wrench & Gear icon
-        59 // Places it right below your existing plugins
+        'dashicons-admin-tools',
+        59
     );
 
-    // Default Submenu: Importer
+    // Submenu 1: Default Importer
     add_submenu_page(
         'cmp-admin-tools',
         'Import Legacy Subscriber',
         'Import Subscriber',
-        'manage_options',
-        'cmp-admin-tools', // Matching parent slug makes this the default tab
+        'read',
+        'cmp-admin-tools',
         'cmp_standalone_render_manual_import'
     );
 
-    // Second Submenu: Cleanup Tool
+    // Submenu 2: Cleanup Tool (Strictly Super Admin)
     add_submenu_page(
         'cmp-admin-tools',
         'Database Cleanup',
@@ -46,13 +46,23 @@ function cmp_standalone_admin_tools_menu() {
         'cmp_standalone_render_cleanup'
     );
 
-    // Third Submenu: Deposit Manager
+    // Submenu 3: Deposit Manager (Under Meal Admin Tools)
     add_submenu_page(
         'cmp-admin-tools',
         'Deposit Manager',
         'Deposit Manager',
-        'manage_options',
+        'read',
         'cmp-deposit-manager',
+        'cmp_standalone_render_deposit_manager'
+    );
+
+    // Cross-Registration: Also show under the main Menu Manager menu for easy discovery
+    add_submenu_page(
+        'cmp-menu-manager',
+        'Deposit Manager',
+        'Deposit Manager',
+        'read',
+        'cmp-deposit-manager-portal',
         'cmp_standalone_render_deposit_manager'
     );
 }
@@ -62,16 +72,13 @@ function cmp_standalone_admin_tools_menu() {
 // ==========================================
 add_action( 'admin_init', 'cmp_download_csv_template' );
 function cmp_download_csv_template() {
-    if ( isset( $_GET['cmp_download_template'] ) && current_user_can( 'manage_options' ) ) {
+    if ( isset( $_GET['cmp_download_template'] ) && ( current_user_can( 'manage_options' ) || current_user_can( 'menu_manager' ) ) ) {
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="Meal_Plan_Bulk_Import_Template.csv"');
         $output = fopen('php://output', 'w');
         fputs($output, chr(0xEF) . chr(0xBB) . chr(0xBF)); 
 
-        // Define exact headers required for the bulk importer
         fputcsv($output, array('Email', 'First Name', 'Last Name', 'Phone', 'Address', 'Delivery Method (Delivery/Pickup)', 'Receive By (Deliver Day Before/Deliver Same Day)', 'Time Slot', 'Allergies', 'Plan Name', 'Remaining Days'));
-        
-        // Add a sample row to guide the FOH Manager
         fputcsv($output, array('john@example.com', 'John', 'Doe', '0501234567', 'Dubai Marina', 'Delivery', 'Deliver Day Before', '5:00 AM to 6:00 AM', 'Nuts', '2 Meal Plan', '20'));
 
         fclose($output);
@@ -83,7 +90,10 @@ function cmp_download_csv_template() {
 // 3. SUBSCRIBER IMPORT TOOL (MANUAL & BULK CSV)
 // ==========================================
 function cmp_standalone_render_manual_import() {
-    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    if ( ! current_user_can( 'manage_options' ) && ! current_user_can( 'menu_manager' ) ) {
+        wp_die( 'Access Denied: You do not have permission to view this tool.' );
+    }
+    
     global $wpdb;
     $message = '';
     $table_subs = $wpdb->prefix . 'cmp_subscriptions';
@@ -91,7 +101,6 @@ function cmp_standalone_render_manual_import() {
     // --- HANDLE BULK CSV IMPORT ---
     if ( isset( $_POST['cmp_run_csv_import'] ) && check_admin_referer( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ) ) {
         if ( !empty( $_FILES['csv_file']['tmp_name'] ) ) {
-            
             $file = $_FILES['csv_file']['tmp_name'];
             $handle = fopen($file, "r");
             
@@ -100,13 +109,10 @@ function cmp_standalone_render_manual_import() {
                 $success_count = 0;
                 $failed_rows = array();
 
-                // Skip the header row
-                fgetcsv($handle, 1000, ",");
+                fgetcsv($handle, 1000, ","); // Skip header
 
                 while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
                     $row_count++;
-                    
-                    // Safely map CSV columns to variables
                     $email          = isset($data[0]) ? sanitize_email($data[0]) : '';
                     $first_name     = isset($data[1]) ? sanitize_text_field($data[1]) : '';
                     $last_name      = isset($data[2]) ? sanitize_text_field($data[2]) : '';
@@ -119,13 +125,11 @@ function cmp_standalone_render_manual_import() {
                     $plan_name      = isset($data[9]) ? sanitize_text_field($data[9]) : '';
                     $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
 
-                    // Strict Validation: Skip row if critical data is missing
                     if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
                         $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Remaining Days.";
                         continue;
                     }
 
-                    // 1. Fetch or Create User Profile
                     $user = get_user_by('email', $email);
                     if (!$user) {
                         $password = wp_generate_password(12, false);
@@ -138,7 +142,6 @@ function cmp_standalone_render_manual_import() {
                         $user_id = $user->ID;
                     }
 
-                    // 2. Save Logistics to User Meta
                     wp_update_user(array('ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name));
                     if(!empty($phone)) update_user_meta($user_id, 'billing_phone', $phone);
                     if(!empty($address)) update_user_meta($user_id, 'billing_address_1', $address);
@@ -147,17 +150,15 @@ function cmp_standalone_render_manual_import() {
                     if(!empty($time_slot)) update_user_meta($user_id, 'time_slot', $time_slot);
                     if(!empty($allergies)) update_user_meta($user_id, 'allergies', $allergies);
 
-                    // 3. Determine Categories for the Quota System
                     if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
                         $categories = 'Juices';
                     } else {
                         $categories = 'Breakfast,Lunch,Dinner,Snacks';
                     }
 
-                    // 4. Inject Directly into Subscription Database
                     $inserted = $wpdb->insert($table_subs, array(
                         'user_id'            => $user_id,
-                        'wc_order_id'        => 0, // Order ID 0 flags this as a manual import
+                        'wc_order_id'        => 0,
                         'plan_name'          => $plan_name,
                         'total_days'         => $remaining_days,
                         'allowed_categories' => $categories,
@@ -174,15 +175,12 @@ function cmp_standalone_render_manual_import() {
                 }
                 fclose($handle);
 
-                // Build Final Success/Failure Message
                 if ($success_count > 0) {
                     $message .= '<div class="notice notice-success"><p><strong>Success!</strong> Successfully imported <strong>' . $success_count . '</strong> customers from the CSV file.</p></div>';
                 }
                 if (!empty($failed_rows)) {
-                    $err_list = implode('<br>', $failed_rows);
-                    $message .= '<div class="notice notice-error"><p><strong>Warning:</strong> The following rows failed to import:<br>' . $err_list . '</p></div>';
+                    $message .= '<div class="notice notice-error"><p><strong>Warning:</strong> The following rows failed to import:<br>' . implode('<br>', $failed_rows) . '</p></div>';
                 }
-
             } else {
                 $message = '<div class="notice notice-error"><p>Error: Could not read the CSV file.</p></div>';
             }
@@ -190,7 +188,6 @@ function cmp_standalone_render_manual_import() {
             $message = '<div class="notice notice-error"><p>Error: Please select a valid CSV file to upload.</p></div>';
         }
     }
-
 
     // --- HANDLE SINGLE MANUAL IMPORT ---
     if ( isset( $_POST['cmp_run_import'] ) && check_admin_referer( 'cmp_import_action', 'cmp_import_nonce' ) ) {
@@ -207,7 +204,6 @@ function cmp_standalone_render_manual_import() {
         $address        = sanitize_text_field($_POST['address']);
         $allergies      = sanitize_textarea_field($_POST['allergies']);
 
-        // Append Recipient Name if Provided
         if (!empty($recipient_name)) {
             $plan_name .= ' - ' . $recipient_name;
         }
@@ -215,10 +211,8 @@ function cmp_standalone_render_manual_import() {
         if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
             $message = '<div class="notice notice-error"><p>Error: Email, Plan Name, and Remaining Days are strictly required.</p></div>';
         } else {
-            // 1. Fetch or Create User Profile
             $user = get_user_by('email', $email);
             if (!$user) {
-                // Auto-generate a secure random password if they don't exist in WP
                 $password = wp_generate_password(12, false);
                 $user_id = wp_create_user($email, $password, $email);
                 if (is_wp_error($user_id)) {
@@ -229,7 +223,6 @@ function cmp_standalone_render_manual_import() {
             }
 
             if (!isset($message) || empty($message)) {
-                // 2. Save Logistics to User Meta (Bulletproof fallback for portals)
                 wp_update_user(array('ID' => $user_id, 'first_name' => $first_name, 'last_name' => $last_name));
                 update_user_meta($user_id, 'billing_phone',     $phone);
                 update_user_meta($user_id, 'billing_address_1', $address);
@@ -238,27 +231,25 @@ function cmp_standalone_render_manual_import() {
                 update_user_meta($user_id, 'time_slot',         $time_slot);
                 update_user_meta($user_id, 'allergies',         $allergies);
 
-                // 3. Determine Categories for the Quota System
                 if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
                     $categories = 'Juices';
                 } else {
                     $categories = 'Breakfast,Lunch,Dinner,Snacks';
                 }
 
-                // 4. Inject Directly into Subscription Database
                 $inserted = $wpdb->insert($table_subs, array(
                     'user_id'            => $user_id,
-                    'wc_order_id'        => 0, // Order ID 0 flags this as a manual import for FOH
+                    'wc_order_id'        => 0,
                     'plan_name'          => $plan_name,
                     'total_days'         => $remaining_days,
                     'allowed_categories' => $categories,
-                    'status'             => 'active', // Activate instantly
+                    'status'             => 'active',
                     'start_date'         => date('Y-m-d H:i:s'),
                     'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
                 ));
 
                 if ($inserted) {
-                    $message = '<div class="notice notice-success"><p><strong>Success!</strong> ' . esc_html($first_name) . ' has been manually imported and assigned <strong>' . $remaining_days . ' days</strong>.</p></div>';
+                    $message = '<div class="notice notice-success"><p><strong>Success!</strong> ' . esc_html($first_name) . ' has been manually imported with <strong>' . $remaining_days . ' days</strong>.</p></div>';
                 } else {
                     $message = '<div class="notice notice-error"><p>Database error during insertion.</p></div>';
                 }
@@ -276,7 +267,7 @@ function cmp_standalone_render_manual_import() {
                 <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
             </div>
             
-            <p style="color: #666; margin-bottom: 20px;">Download the template above, fill it out strictly matching the column headers, and upload it here to import dozens of customers at once. <em>(Note: To assign a family member, just append their name in the Plan Name column, e.g., "2 Meal Plan - Sarah").</em></p>
+            <p style="color: #666; margin-bottom: 20px;">Upload a CSV strictly matching the template headers to import multiple customers at once.</p>
             
             <form method="POST" action="" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px; background: #f8f9fa; padding: 15px; border: 1px dashed #ccc; border-radius: 4px;">
                 <?php wp_nonce_field( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ); ?>
@@ -287,8 +278,6 @@ function cmp_standalone_render_manual_import() {
         
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
             <h2 style="margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px;">Single Manual Entry Form</h2>
-            <p style="color: #666; margin-bottom: 25px;">Use this tool to add a single customer who paid offline or is halfway through an old plan. If the email address doesn't exist in the system, a new account will be auto-created.</p>
-            
             <form method="POST" action="">
                 <?php wp_nonce_field( 'cmp_import_action', 'cmp_import_nonce' ); ?>
                 
@@ -350,7 +339,7 @@ function cmp_standalone_render_manual_import() {
 
                 <div style="margin-bottom: 20px;">
                     <label style="font-weight: bold; display: block; margin-bottom: 5px;">Allergies</label>
-                    <input type="text" name="allergies" placeholder="e.g., Nuts, Shellfish (Leave blank if none)" style="width: 100%; padding: 6px;">
+                    <input type="text" name="allergies" placeholder="e.g., Nuts, Shellfish" style="width: 100%; padding: 6px;">
                 </div>
 
                 <hr style="border: 0; border-top: 1px solid #eee; margin: 25px 0;">
@@ -386,7 +375,10 @@ function cmp_standalone_render_manual_import() {
 // 4. DATABASE CLEANUP TOOL
 // ==========================================
 function cmp_standalone_render_cleanup() {
-    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    if ( ! current_user_can( 'manage_options' ) ) {
+        wp_die( 'Access Denied: Only Super Administrators can run database cleanups.' );
+    }
+    
     global $wpdb;
     $table_subs = $wpdb->prefix . 'cmp_subscriptions';
     $table_logs = $wpdb->prefix . 'cmp_daily_logs';
@@ -396,14 +388,14 @@ function cmp_standalone_render_cleanup() {
         $days_old = intval( $_POST['days_old'] );
         $confirm  = isset( $_POST['confirm_delete'] );
         if ( $days_old < 30 ) {
-            $message = '<div class="notice notice-error"><p><strong>Error:</strong> Minimum 30 days.</p></div>';
+            $message = '<div class="notice notice-error"><p><strong>Error:</strong> Minimum timeframe is 30 days.</p></div>';
         } elseif ( ! $confirm ) {
             $message = '<div class="notice notice-error"><p><strong>Error:</strong> Please check the confirmation box.</p></div>';
         } else {
             $cutoff_date    = date( 'Y-m-d H:i:s', strtotime( "-$days_old days" ) );
             $subs_to_delete = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_subs WHERE expiry_date < %s", $cutoff_date ) );
             if ( empty( $subs_to_delete ) ) {
-                $message = '<div class="notice notice-info"><p>No subscriptions found. Database is clean!</p></div>';
+                $message = '<div class="notice notice-info"><p>No subscriptions found. Database is already clean.</p></div>';
             } else {
                 $ids_list     = implode( ',', array_map( 'intval', $subs_to_delete ) );
                 $logs_deleted = $wpdb->query( "DELETE FROM $table_logs WHERE subscription_id IN ($ids_list)" );
@@ -418,14 +410,13 @@ function cmp_standalone_render_cleanup() {
         <?php echo $message; ?>
         <div style="background: #fff; padding: 20px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 700px;">
             <h2 style="margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px;">Purge Old Subscription Data</h2>
-            <p>Permanently delete old subscriptions and daily meal logs. <strong>Customer accounts and addresses will NOT be deleted.</strong></p>
+            <p>Permanently delete expired subscriptions and logs. <strong>Customer profiles and orders are preserved.</strong></p>
             <form method="POST" action="">
                 <?php wp_nonce_field( 'cmp_cleanup_action', 'cmp_cleanup_nonce' ); ?>
                 <table class="form-table">
                     <tr>
                         <th><label for="days_old">Target Timeframe:</label></th>
-                        <td>Delete plans expired more than <input type="number" name="days_old" id="days_old" value="90" min="30" max="3650" style="width: 80px;"> days ago.
-                            <p class="description">Minimum 30 days.</p></td>
+                        <td>Delete plans expired more than <input type="number" name="days_old" id="days_old" value="90" min="30" max="3650" style="width: 80px;"> days ago.</td>
                     </tr>
                     <tr>
                         <th>Confirm:</th>
@@ -443,7 +434,11 @@ function cmp_standalone_render_cleanup() {
 // 5. BACKEND DEPOSIT MANAGER TAB
 // ==========================================
 function cmp_standalone_render_deposit_manager() {
-    if ( ! current_user_can( 'manage_options' ) ) wp_die( 'Insufficient permissions.' );
+    if ( ! current_user_can( 'manage_options' ) && ! current_user_can( 'menu_manager' ) && ! current_user_can( 'accounts_team' ) && ! current_user_can( 'foh_manager' ) ) {
+        wp_die( 'Access Denied: You do not have permission to manage deposits.' );
+    }
+
+    global $wpdb;
     $message = '';
 
     if(isset($_POST['cmp_toggle_deposit']) && check_admin_referer('cmp_deposit_action', 'cmp_deposit_nonce')) {
@@ -453,53 +448,58 @@ function cmp_standalone_render_deposit_manager() {
         $message = '<div class="notice notice-success"><p>Deposit status updated successfully.</p></div>';
     }
 
-    $search_email = isset($_POST['search_email']) ? sanitize_email($_POST['search_email']) : '';
+    $raw_query = isset($_POST['search_email']) ? sanitize_text_field($_POST['search_email']) : '';
     $searched_user = null;
 
-    if(!empty($search_email) && isset($_POST['cmp_search_user'])) {
-        $searched_user = get_user_by('email', $search_email);
-        if(!$searched_user) {
-            $message = '<div class="notice notice-error"><p>No customer found with that email.</p></div>';
+    if(!empty($raw_query)) {
+        $clean_email = sanitize_email($raw_query);
+        $searched_user = $clean_email ? get_user_by('email', $clean_email) : null;
+        if (!$searched_user) {
+            $searched_user = get_user_by('login', $raw_query);
         }
-    } elseif (!empty($search_email) && isset($_POST['cmp_toggle_deposit'])) {
-        $searched_user = get_user_by('email', $search_email);
+        if (!$searched_user && isset($_POST['cmp_search_user'])) {
+            $message = '<div class="notice notice-error"><p>No customer found with that email or username.</p></div>';
+        }
     }
 
     ?>
     <div class="wrap">
-        <h1 style="margin-bottom: 20px;">Deposit Manager</h1>
+        <h1 style="margin-bottom: 20px;">Customer Deposit Wallet</h1>
         <?php echo $message; ?>
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
-            <p style="color: #666; margin-bottom: 20px;">Search for a customer by email to view or refund their AED 150 Thermal Bag Deposit. Refunding the deposit here ensures they will be correctly charged again on their next checkout.</p>
+            <p style="color: #666; margin-bottom: 20px;">Search by email to view or refund a customer's AED 150 Thermal Bag Deposit. Marking as refunded ensures the deposit is automatically charged again on their next checkout renewal.</p>
             
             <form method="POST" style="display: flex; gap: 15px; margin-bottom: 30px;">
-                <input type="email" name="search_email" placeholder="Customer Email Address" value="<?php echo esc_attr($search_email); ?>" required style="flex: 1; padding: 6px;">
-                <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b;">Search Customer</button>
+                <input type="text" name="search_email" placeholder="Customer Email Address" value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
+                <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b; font-weight: bold;">Search Customer</button>
             </form>
 
             <?php if ($searched_user): 
                 $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                if ($deposit_held === '') { $deposit_held = 'yes'; } // Grandfathering fallback
+                if ($deposit_held === '') {
+                    $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                    $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                }
                 $is_held = ($deposit_held === 'yes');
             ?>
             <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $is_held ? '#10b981' : '#dc2626'; ?>;">
-                <h3 style="margin-top: 0; font-size: 1.4em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h3>
-                <p style="font-size: 1.1em; color: #555;"><strong>Email:</strong> <?php echo esc_html($searched_user->user_email); ?></p>
-                <p style="font-size: 1.1em; margin-bottom: 20px;"><strong>Deposit Status:</strong> 
+                <h3 style="margin-top: 0; font-size: 1.3em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h3>
+                <p style="font-size: 1em; color: #555; margin-bottom: 8px;"><strong>Email:</strong> <?php echo esc_html($searched_user->user_email); ?></p>
+                <p style="font-size: 1em; margin-bottom: 20px;"><strong>Status:</strong> 
                     <?php if($is_held): ?>
-                        <span style="color: #10b981; font-weight: bold; background: #dcfce7; padding: 3px 8px; border-radius: 4px;">Held</span>
+                        <span style="color: #10b981; font-weight: bold; background: #dcfce7; padding: 4px 10px; border-radius: 4px;">Deposit Held (Waived at Checkout)</span>
                     <?php else: ?>
-                        <span style="color: #dc2626; font-weight: bold; background: #fee2e2; padding: 3px 8px; border-radius: 4px;">Refunded / No Deposit</span>
+                        <span style="color: #dc2626; font-weight: bold; background: #fee2e2; padding: 4px 10px; border-radius: 4px;">Refunded / No Deposit (Charge AED 150)</span>
                     <?php endif; ?>
                 </p>
                 
-                <form method="POST" style="margin-top: 20px;">
+                <form method="POST" style="margin-top: 15px;">
                     <?php wp_nonce_field('cmp_deposit_action', 'cmp_deposit_nonce'); ?>
-                    <input type="hidden" name="search_email" value="<?php echo esc_attr($search_email); ?>">
+                    <input type="hidden" name="search_email" value="<?php echo esc_attr($raw_query); ?>">
                     <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
                     <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
-                    <button type="submit" name="cmp_toggle_deposit" class="button <?php echo $is_held ? 'button-secondary' : 'button-primary'; ?>" style="<?php echo $is_held ? 'color: #dc2626; border-color: #dc2626;' : 'background: #10b981; border-color: #10b981;'; ?>">
-                        <?php echo $is_held ? 'Mark as Refunded (Remove Tag)' : 'Mark as Held (Add Tag)'; ?>
+                    <button type="submit" name="cmp_toggle_deposit" class="button" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: #fff; border: none; padding: 6px 18px; font-weight: bold; cursor: pointer;">
+                        <?php echo $is_held ? 'Mark as Refunded (Charge Deposit Next Time)' : 'Mark as Held (Waive Deposit Next Time)'; ?>
                     </button>
                 </form>
             </div>
@@ -508,7 +508,6 @@ function cmp_standalone_render_deposit_manager() {
     </div>
     <?php
 }
-
 
 // ==========================================
 // 6. FRONTEND: ADMIN TOOLS PORTAL
@@ -520,11 +519,11 @@ function cmp_render_frontend_admin_tools() {
     if ( ! is_user_logged_in() ) {
         $login_args = array('echo' => false, 'form_id' => 'cmp-tools-login', 'label_username' => __('Email Address or Username'), 'label_password' => __('Password'));
         $custom_css = '<style>#cmp-tools-login label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; text-align: left; } #cmp-tools-login input[type="text"], #cmp-tools-login input[type="password"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; } #cmp-tools-login .login-submit input[type="submit"] { width: 100%; background: #0073aa; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }</style>';
-        return $custom_css . '<div style="max-width:400px; margin:50px auto; padding:30px; background:#f8f9fa; border-radius:8px; border:1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,0.05);"><h2 style="text-align:center; margin-top:0; color:#222;">Admin Tools Login</h2><p style="text-align:center; color:#666; margin-bottom:20px;">Please log in with an authorized account.</p>' . wp_login_form( $login_args ) . '</div>';
+        return $custom_css . '<div style="max-width:400px; margin:50px auto; padding:30px; background:#f8f9fa; border-radius:8px; border:1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,0.05);"><h2 style="text-align:center; margin-top:0; color:#222;">Admin Tools Login</h2><p style="text-align:center; color:#666; margin-bottom:20px;">Authorized staff account required.</p>' . wp_login_form( $login_args ) . '</div>';
     }
 
-    if ( !current_user_can('manage_options') && !current_user_can('menu_manager') ) {
-        return '<div style="max-width: 600px; margin: 50px auto; padding: 30px; background: #fff; border-left: 4px solid #dc3232; box-shadow: 0 4px 6px rgba(0,0,0,0.05);"><p style="font-size: 1.1em; color: #dc3232;"><strong>Access Denied:</strong> You do not have permission to view Admin Tools.</p></div>';
+    if ( !current_user_can('manage_options') && !current_user_can('menu_manager') && !current_user_can('accounts_team') && !current_user_can('foh_manager') ) {
+        return '<div style="max-width: 600px; margin: 50px auto; padding: 30px; background: #fff; border-left: 4px solid #dc3232; box-shadow: 0 4px 6px rgba(0,0,0,0.05);"><p style="font-size: 1.1em; color: #dc3232;"><strong>Access Denied:</strong> Authorized personnel only.</p></div>';
     }
 
     global $wpdb;
@@ -535,20 +534,21 @@ function cmp_render_frontend_admin_tools() {
     $cleanup_message = '';
     $deposit_message = '';
 
-    // --- TAB STATE TRACKER ---
-    $active_tab = 'tab-import'; // Default Tab
+    $can_import  = current_user_can('manage_options') || current_user_can('menu_manager');
+    $can_cleanup = current_user_can('manage_options');
 
-    // --- HANDLE FORM SUBMISSIONS ON FRONTEND ---
+    // Default tab: Accounts team opens directly into the Deposit Manager
+    $active_tab = ( current_user_can('accounts_team') && !$can_import ) ? 'tab-deposit' : 'tab-import';
 
     // A. CSV Bulk Import
-    if ( isset( $_POST['cmp_frontend_csv_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') ) {
+    if ( isset( $_POST['cmp_frontend_csv_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') && $can_import ) {
         $active_tab = 'tab-import';
         if ( !empty( $_FILES['csv_file']['tmp_name'] ) ) {
             $file = $_FILES['csv_file']['tmp_name'];
             $handle = fopen($file, "r");
             if ($handle !== FALSE) {
                 $row_count = 0; $success_count = 0; $failed_rows = array();
-                fgetcsv($handle, 1000, ","); // skip header
+                fgetcsv($handle, 1000, ",");
                 while (($data = fgetcsv($handle, 1000, ",")) !== FALSE) {
                     $row_count++;
                     $email          = isset($data[0]) ? sanitize_email($data[0]) : '';
@@ -564,7 +564,7 @@ function cmp_render_frontend_admin_tools() {
                     $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
 
                     if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
-                        $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Remaining Days.";
+                        $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Days.";
                         continue;
                     }
 
@@ -585,9 +585,7 @@ function cmp_render_frontend_admin_tools() {
                     if(!empty($time_slot)) update_user_meta($user_id, 'time_slot', $time_slot);
                     if(!empty($allergies)) update_user_meta($user_id, 'allergies', $allergies);
 
-                    if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
-                        $categories = 'Juices';
-                    } else { $categories = 'Breakfast,Lunch,Dinner,Snacks'; }
+                    $categories = (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) ? 'Juices' : 'Breakfast,Lunch,Dinner,Snacks';
 
                     $inserted = $wpdb->insert($table_subs, array(
                         'user_id'            => $user_id,
@@ -612,7 +610,7 @@ function cmp_render_frontend_admin_tools() {
     }
 
     // B. Manual Single Import
-    if ( isset( $_POST['cmp_frontend_manual_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') ) {
+    if ( isset( $_POST['cmp_frontend_manual_import'] ) && wp_verify_nonce($_POST['cmp_import_nonce'], 'cmp_frontend_import') && $can_import ) {
         $active_tab     = 'tab-import';
         $email          = sanitize_email($_POST['email']);
         $first_name     = sanitize_text_field($_POST['first_name']);
@@ -646,9 +644,7 @@ function cmp_render_frontend_admin_tools() {
             update_user_meta($user_id, 'time_slot',         $time_slot);
             update_user_meta($user_id, 'allergies',         $allergies);
 
-            if (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) {
-                $categories = 'Juices';
-            } else { $categories = 'Breakfast,Lunch,Dinner,Snacks'; }
+            $categories = (stripos($plan_name, 'juice') !== false || stripos($plan_name, 'cleanse') !== false) ? 'Juices' : 'Breakfast,Lunch,Dinner,Snacks';
 
             $inserted = $wpdb->insert($table_subs, array(
                 'user_id'            => $user_id,
@@ -670,7 +666,7 @@ function cmp_render_frontend_admin_tools() {
     }
 
     // C. Database Cleanup
-    if ( isset( $_POST['cmp_frontend_run_cleanup'] ) && wp_verify_nonce($_POST['cmp_cleanup_nonce'], 'cmp_frontend_cleanup') ) {
+    if ( isset( $_POST['cmp_frontend_run_cleanup'] ) && wp_verify_nonce($_POST['cmp_cleanup_nonce'], 'cmp_frontend_cleanup') && $can_cleanup ) {
         $active_tab = 'tab-cleanup';
         $days_old = intval( $_POST['days_old'] );
         $confirm  = isset( $_POST['confirm_delete'] );
@@ -694,27 +690,30 @@ function cmp_render_frontend_admin_tools() {
 
     // D. Deposit Manager
     $searched_user = null;
-    $search_email = '';
+    $raw_query = '';
     
     if ( isset( $_POST['cmp_frontend_search_deposit'] ) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit') ) {
         $active_tab = 'tab-deposit';
-        $search_email = sanitize_email($_POST['search_email']);
-        $searched_user = get_user_by('email', $search_email);
+        $raw_query  = sanitize_text_field($_POST['search_email']);
+        $clean_email = sanitize_email($raw_query);
+        $searched_user = $clean_email ? get_user_by('email', $clean_email) : null;
         if (!$searched_user) {
-            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found with that email.</div>';
+            $searched_user = get_user_by('login', $raw_query);
+        }
+        if (!$searched_user) {
+            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found with that email or username.</div>';
         }
     }
 
     if ( isset( $_POST['cmp_frontend_toggle_deposit'] ) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit') ) {
         $active_tab = 'tab-deposit';
-        $user_id = intval($_POST['user_id']);
+        $user_id    = intval($_POST['user_id']);
         $new_status = sanitize_text_field($_POST['new_status']);
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
-        $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deposit status updated perfectly.</div>';
+        $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deposit wallet status updated.</div>';
         
-        // Re-fetch user to display updated state
         $searched_user = get_userdata($user_id);
-        $search_email = $searched_user->user_email;
+        $raw_query     = $searched_user->user_email;
     }
 
     ob_start();
@@ -737,16 +736,23 @@ function cmp_render_frontend_admin_tools() {
         <div style="background: #0f172a; color: #fff; padding: 25px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <div>
                 <h2 style="margin: 0; color: #fff;">Admin Tools</h2>
-                <p style="margin: 5px 0 0 0; color: #94a3b8;">Legacy Imports & Database Maintenance</p>
+                <p style="margin: 5px 0 0 0; color: #94a3b8;">Legacy Imports, Logistics & Deposit Operations</p>
             </div>
         </div>
 
         <div class="tools-nav">
+            <?php if ($can_import): ?>
             <button class="tools-tab-btn <?php echo $active_tab == 'tab-import' ? 'active' : ''; ?>" onclick="switchToolsTab(event, 'tab-import')">Import Subscribers</button>
+            <?php endif; ?>
+
+            <?php if ($can_cleanup): ?>
             <button class="tools-tab-btn <?php echo $active_tab == 'tab-cleanup' ? 'active' : ''; ?>" onclick="switchToolsTab(event, 'tab-cleanup')">Database Cleanup</button>
+            <?php endif; ?>
+
             <button class="tools-tab-btn <?php echo $active_tab == 'tab-deposit' ? 'active' : ''; ?>" onclick="switchToolsTab(event, 'tab-deposit')">Deposit Manager</button>
         </div>
 
+        <?php if ($can_import): ?>
         <!-- TAB 1: IMPORTER -->
         <div id="tab-import" class="tools-content <?php echo $active_tab == 'tab-import' ? 'active' : ''; ?>">
             <?php echo $import_message; ?>
@@ -756,7 +762,7 @@ function cmp_render_frontend_admin_tools() {
                     <h3 style="margin: 0; color: #047857;">Bulk CSV Import</h3>
                     <a href="?cmp_download_template=1" style="background: #10b981; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.9em;">Download CSV Template</a>
                 </div>
-                <p style="color: #64748b; margin-bottom: 20px;">Download the template above, fill it out exactly as formatted, and upload it here to import multiple customers. <em>(Note: To assign a family member, just append their name in the Plan Name column, e.g., "2 Meal Plan - Sarah").</em></p>
+                <p style="color: #64748b; margin-bottom: 20px;">Upload a CSV to import multiple subscribers. Family recipients can be specified by appending their name to the Plan Name (e.g., "2 Meal Plan - Sarah").</p>
                 <form method="POST" enctype="multipart/form-data" style="display: flex; gap: 15px; align-items: center;">
                     <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
                     <input type="file" name="csv_file" accept=".csv" required style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; flex-grow: 1;">
@@ -768,7 +774,6 @@ function cmp_render_frontend_admin_tools() {
                 <h3 style="margin-top: 0; color: #0369a1; border-bottom: 1px solid #eee; padding-bottom: 15px;">Single Manual Entry Form</h3>
                 <form method="POST">
                     <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
-                    
                     <div class="tools-flex">
                         <div><label class="tools-label">Email *</label><input type="email" name="email" required class="tools-input"></div>
                         <div><label class="tools-label">Phone *</label><input type="text" name="phone" required class="tools-input"></div>
@@ -824,7 +829,6 @@ function cmp_render_frontend_admin_tools() {
                         <div style="flex:1;">
                             <label class="tools-label">Recipient Name</label>
                             <input type="text" name="recipient_name" class="tools-input" placeholder="e.g. Sarah">
-                            <span style="font-size: 0.85em; color: #64748b;">(Optional) For family members sharing an email.</span>
                         </div>
                         <div style="flex:1;">
                             <label class="tools-label">Remaining Days *</label>
@@ -835,13 +839,15 @@ function cmp_render_frontend_admin_tools() {
                 </form>
             </div>
         </div>
+        <?php endif; ?>
 
+        <?php if ($can_cleanup): ?>
         <!-- TAB 2: CLEANUP -->
         <div id="tab-cleanup" class="tools-content <?php echo $active_tab == 'tab-cleanup' ? 'active' : ''; ?>">
             <?php echo $cleanup_message; ?>
             <div class="tools-card" style="border-left: 4px solid #dc2626;">
                 <h3 style="margin-top: 0; color: #991b1b; border-bottom: 1px solid #eee; padding-bottom: 15px;">Purge Old Subscription Data</h3>
-                <p style="color: #64748b; margin-bottom: 25px;">Permanently delete old subscriptions and daily meal logs. <strong>Customer accounts and addresses will NOT be deleted.</strong></p>
+                <p style="color: #64748b; margin-bottom: 25px;">Permanently delete expired subscriptions and logs. Customer profiles and addresses will not be deleted.</p>
                 <form method="POST">
                     <?php wp_nonce_field('cmp_frontend_cleanup', 'cmp_cleanup_nonce'); ?>
                     <div style="margin-bottom: 20px;">
@@ -858,23 +864,27 @@ function cmp_render_frontend_admin_tools() {
                 </form>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- TAB 3: DEPOSIT MANAGER -->
         <div id="tab-deposit" class="tools-content <?php echo $active_tab == 'tab-deposit' ? 'active' : ''; ?>">
             <?php echo $deposit_message; ?>
             <div class="tools-card" style="border-left: 4px solid #f59e0b;">
                 <h3 style="margin-top: 0; color: #b45309; border-bottom: 1px solid #eee; padding-bottom: 15px;">Customer Deposit Wallet</h3>
-                <p style="color: #64748b; margin-bottom: 25px;">Search for a customer by email to view or refund their AED 150 Thermal Bag Deposit. Refunding the deposit here ensures they will be charged again on their next checkout.</p>
+                <p style="color: #64748b; margin-bottom: 25px;">Search for a customer by email or username to audit their AED 150 Thermal Bag Deposit status. Marking as refunded ensures the deposit is charged again on their next renewal.</p>
                 
                 <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px;">
                     <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                    <input type="email" name="search_email" placeholder="Customer Email Address" value="<?php echo esc_attr($search_email); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                    <input type="text" name="search_email" placeholder="Customer Email Address or Username" value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
                     <button type="submit" name="cmp_frontend_search_deposit" style="background: #f59e0b; color: white; border: none; padding: 10px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Search Customer</button>
                 </form>
 
                 <?php if ($searched_user): 
                     $deposit_held = get_user_meta($searched_user->ID, '_cmp_deposit_held', true);
-                    if ($deposit_held === '') { $deposit_held = 'yes'; } // Grandfathering logic fallback
+                    if ($deposit_held === '') {
+                        $past_plans = $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$wpdb->prefix}cmp_subscriptions WHERE user_id = %d", $searched_user->ID));
+                        $deposit_held = (intval($past_plans) > 0) ? 'yes' : 'no';
+                    }
                     $is_held = ($deposit_held === 'yes');
                 ?>
                 <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-radius: 6px;">
@@ -886,11 +896,11 @@ function cmp_render_frontend_admin_tools() {
                         <div>
                             <form method="POST" style="margin: 0;">
                                 <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                                <input type="hidden" name="search_email" value="<?php echo esc_attr($search_email); ?>">
+                                <input type="hidden" name="search_email" value="<?php echo esc_attr($raw_query); ?>">
                                 <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
                                 <input type="hidden" name="new_status" value="<?php echo $is_held ? 'no' : 'yes'; ?>">
                                 <button type="submit" name="cmp_frontend_toggle_deposit" style="background: <?php echo $is_held ? '#dc2626' : '#10b981'; ?>; color: white; border: none; padding: 10px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s;">
-                                    <?php echo $is_held ? 'Mark as Refunded (Remove Tag)' : 'Mark as Held (Add Tag)'; ?>
+                                    <?php echo $is_held ? 'Mark as Refunded (Charge Next Time)' : 'Mark as Held (Waive Next Time)'; ?>
                                 </button>
                             </form>
                         </div>
@@ -898,9 +908,9 @@ function cmp_render_frontend_admin_tools() {
                     <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #cbd5e1;">
                         <span style="font-weight: bold; color: #334155;">Current Status: </span>
                         <?php if($is_held): ?>
-                            <span style="background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Bag Deposit Held</span>
+                            <span style="background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Bag Deposit Held (Waived)</span>
                         <?php else: ?>
-                            <span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Refunded / No Deposit</span>
+                            <span style="background: #fee2e2; color: #991b1b; padding: 4px 10px; border-radius: 20px; font-size: 0.9em; font-weight: bold;">Refunded / No Deposit (Will Charge AED 150)</span>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -915,8 +925,9 @@ function cmp_render_frontend_admin_tools() {
     function switchToolsTab(evt, tabId) {
         document.querySelectorAll(".tools-content").forEach(c => c.classList.remove("active"));
         document.querySelectorAll(".tools-tab-btn").forEach(b => b.classList.remove("active"));
-        document.getElementById(tabId).classList.add("active");
-        evt.currentTarget.classList.add("active");
+        const target = document.getElementById(tabId);
+        if (target) { target.classList.add("active"); }
+        if (evt && evt.currentTarget) { evt.currentTarget.classList.add("active"); }
     }
     </script>
     <?php
