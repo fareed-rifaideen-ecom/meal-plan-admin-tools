@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.5
+ * Version: 1.6
  * Author: Fareed M Rifaideen
  */
 
@@ -78,8 +78,8 @@ function cmp_download_csv_template() {
         $output = fopen('php://output', 'w');
         fputs($output, chr(0xEF) . chr(0xBB) . chr(0xBF)); 
 
-        fputcsv($output, array('Email', 'First Name', 'Last Name', 'Phone', 'Address', 'Delivery Method (Delivery/Pickup)', 'Receive By (Deliver Day Before/Deliver Same Day)', 'Time Slot', 'Allergies', 'Plan Name', 'Remaining Days'));
-        fputcsv($output, array('john@example.com', 'John', 'Doe', '0501234567', 'Dubai Marina', 'Delivery', 'Deliver Day Before', '5:00 AM to 6:00 AM', 'Nuts', '2 Meal Plan', '20'));
+        fputcsv($output, array('Email', 'First Name', 'Last Name', 'Phone', 'Address', 'Delivery Method (Delivery/Pickup)', 'Receive By (Deliver Day Before/Deliver Same Day)', 'Time Slot', 'Allergies', 'Plan Name', 'Remaining Days', 'Plan Price', 'Discount Amount'));
+        fputcsv($output, array('john@example.com', 'John', 'Doe', '0501234567', 'Dubai Marina', 'Delivery', 'Deliver Day Before', '5:00 AM to 6:00 AM', 'Nuts', '2 Meal Plan', '20', '2420.00', '0.00'));
 
         fclose($output);
         exit;
@@ -124,6 +124,8 @@ function cmp_standalone_render_manual_import() {
                     $allergies      = isset($data[8]) ? sanitize_text_field($data[8]) : '';
                     $plan_name      = isset($data[9]) ? sanitize_text_field($data[9]) : '';
                     $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
+                    $plan_price     = isset($data[11]) ? floatval($data[11]) : 0.00;
+                    $discount_amt   = isset($data[12]) ? floatval($data[12]) : 0.00;
 
                     if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
                         $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Remaining Days.";
@@ -158,16 +160,21 @@ function cmp_standalone_render_manual_import() {
 
                     $inserted = $wpdb->insert($table_subs, array(
                         'user_id'            => $user_id,
-                        'wc_order_id'        => 0,
+                        'wc_order_id'        => 0, // Temp placeholder
                         'plan_name'          => $plan_name,
                         'total_days'         => $remaining_days,
                         'allowed_categories' => $categories,
+                        'plan_price'         => $plan_price,
+                        'discount_amount'    => $discount_amt,
                         'status'             => 'active',
                         'start_date'         => date('Y-m-d H:i:s'),
                         'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
                     ));
 
                     if ($inserted) {
+                        // Apply the Negative M-0000 Sequence Hack
+                        $new_sub_id = $wpdb->insert_id;
+                        $wpdb->update($table_subs, array('wc_order_id' => -$new_sub_id), array('id' => $new_sub_id));
                         $success_count++;
                     } else {
                         $failed_rows[] = "Row $row_count ($email): Database insertion failed.";
@@ -203,6 +210,8 @@ function cmp_standalone_render_manual_import() {
         $time_slot      = sanitize_text_field($_POST['time_slot']);
         $address        = sanitize_text_field($_POST['address']);
         $allergies      = sanitize_textarea_field($_POST['allergies']);
+        $plan_price     = floatval($_POST['plan_price']);
+        $discount_amt   = floatval($_POST['discount_amount']);
 
         if (!empty($recipient_name)) {
             $plan_name .= ' - ' . $recipient_name;
@@ -239,16 +248,22 @@ function cmp_standalone_render_manual_import() {
 
                 $inserted = $wpdb->insert($table_subs, array(
                     'user_id'            => $user_id,
-                    'wc_order_id'        => 0,
+                    'wc_order_id'        => 0, // Temp placeholder
                     'plan_name'          => $plan_name,
                     'total_days'         => $remaining_days,
                     'allowed_categories' => $categories,
+                    'plan_price'         => $plan_price,
+                    'discount_amount'    => $discount_amt,
                     'status'             => 'active',
                     'start_date'         => date('Y-m-d H:i:s'),
                     'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
                 ));
 
                 if ($inserted) {
+                    // Apply the Negative M-0000 Sequence Hack
+                    $new_sub_id = $wpdb->insert_id;
+                    $wpdb->update($table_subs, array('wc_order_id' => -$new_sub_id), array('id' => $new_sub_id));
+                    
                     $message = '<div class="notice notice-success"><p><strong>Success!</strong> ' . esc_html($first_name) . ' has been manually imported with <strong>' . $remaining_days . ' days</strong>.</p></div>';
                 } else {
                     $message = '<div class="notice notice-error"><p>Database error during insertion.</p></div>';
@@ -361,6 +376,17 @@ function cmp_standalone_render_manual_import() {
                     <div style="flex: 1;">
                         <label style="font-weight: bold; display: block; margin-bottom: 5px;">Remaining Days *</label>
                         <input type="number" name="remaining_days" required min="1" max="100" style="width: 100%; padding: 6px;" placeholder="e.g. 14">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 20px; margin-bottom: 25px;">
+                    <div style="flex: 1;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Plan Price (AED) *</label>
+                        <input type="number" step="0.01" name="plan_price" required min="0" style="width: 100%; padding: 6px;" placeholder="e.g. 2420.00" value="0.00">
+                    </div>
+                    <div style="flex: 1;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Discount Amount (AED)</label>
+                        <input type="number" step="0.01" name="discount_amount" min="0" style="width: 100%; padding: 6px;" placeholder="e.g. 150.00" value="0.00">
                     </div>
                 </div>
 
@@ -660,6 +686,8 @@ function cmp_render_frontend_admin_tools() {
                     $allergies      = isset($data[8]) ? sanitize_text_field($data[8]) : '';
                     $plan_name      = isset($data[9]) ? sanitize_text_field($data[9]) : '';
                     $remaining_days = isset($data[10]) ? intval($data[10]) : 0;
+                    $plan_price     = isset($data[11]) ? floatval($data[11]) : 0.00;
+                    $discount_amt   = isset($data[12]) ? floatval($data[12]) : 0.00;
 
                     if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
                         $failed_rows[] = "Row $row_count: Missing Email, Plan Name, or Days.";
@@ -691,13 +719,21 @@ function cmp_render_frontend_admin_tools() {
                         'plan_name'          => $plan_name,
                         'total_days'         => $remaining_days,
                         'allowed_categories' => $categories,
+                        'plan_price'         => $plan_price,
+                        'discount_amount'    => $discount_amt,
                         'status'             => 'active',
                         'start_date'         => date('Y-m-d H:i:s'),
                         'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
                     ));
 
-                    if ($inserted) $success_count++;
-                    else $failed_rows[] = "Row $row_count ($email): DB Error.";
+                    if ($inserted) {
+                        // Apply Negative M-Sequence Hack
+                        $new_sub_id = $wpdb->insert_id;
+                        $wpdb->update($table_subs, array('wc_order_id' => -$new_sub_id), array('id' => $new_sub_id));
+                        $success_count++;
+                    } else {
+                        $failed_rows[] = "Row $row_count ($email): DB Error.";
+                    }
                 }
                 fclose($handle);
 
@@ -722,6 +758,8 @@ function cmp_render_frontend_admin_tools() {
         $time_slot      = sanitize_text_field($_POST['time_slot']);
         $address        = sanitize_text_field($_POST['address']);
         $allergies      = sanitize_textarea_field($_POST['allergies']);
+        $plan_price     = floatval($_POST['plan_price']);
+        $discount_amt   = floatval($_POST['discount_amount']);
 
         if (!empty($recipient_name)) { $plan_name .= ' - ' . $recipient_name; }
 
@@ -750,12 +788,18 @@ function cmp_render_frontend_admin_tools() {
                 'plan_name'          => $plan_name,
                 'total_days'         => $remaining_days,
                 'allowed_categories' => $categories,
+                'plan_price'         => $plan_price,
+                'discount_amount'    => $discount_amt,
                 'status'             => 'active',
                 'start_date'         => date('Y-m-d H:i:s'),
                 'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
             ));
 
             if ($inserted) {
+                // Apply Negative M-Sequence Hack
+                $new_sub_id = $wpdb->insert_id;
+                $wpdb->update($table_subs, array('wc_order_id' => -$new_sub_id), array('id' => $new_sub_id));
+
                 $import_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> ' . esc_html($first_name) . ' added.</div>';
             } else {
                 $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Database Error.</div>';
@@ -974,6 +1018,18 @@ function cmp_render_frontend_admin_tools() {
                             <input type="number" name="remaining_days" required min="1" class="tools-input" placeholder="e.g. 14">
                         </div>
                     </div>
+                    
+                    <div class="tools-flex" style="margin-top: -5px; margin-bottom: 25px;">
+                        <div style="flex:1;">
+                            <label class="tools-label">Plan Price (AED) *</label>
+                            <input type="number" step="0.01" name="plan_price" required min="0" class="tools-input" placeholder="e.g. 2420.00" value="0.00">
+                        </div>
+                        <div style="flex:1;">
+                            <label class="tools-label">Discount Amount (AED)</label>
+                            <input type="number" step="0.01" name="discount_amount" min="0" class="tools-input" placeholder="e.g. 150.00" value="0.00">
+                        </div>
+                    </div>
+
                     <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
                 </form>
             </div>
@@ -1053,7 +1109,7 @@ function cmp_render_frontend_admin_tools() {
                                 <option value="own_bag" <?php selected($deposit_held, 'own_bag'); ?>>Customer's Own Bag</option>
                                 <option value="no" <?php selected($deposit_held, 'no'); ?>>Refunded / No Deposit</option>
                             </select>
-                            <button type="submit" name="cmp_frontend_toggle_deposit" class="button" style="background: #334155; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">
+                            <button type="submit" name="cmp_frontend_toggle_deposit" class="button" style="background: #334155; color: white; border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">
                                 Update Wallet
                             </button>
                         </form>
