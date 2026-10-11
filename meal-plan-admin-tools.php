@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.6
+ * Version: 1.7
  * Author: Fareed M Rifaideen
  */
 
@@ -15,20 +15,9 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 add_action( 'admin_menu', 'cmp_standalone_admin_tools_menu', 60 );
 function cmp_standalone_admin_tools_menu() {
     
-    // Top-Level Menu (Accessible by Admin, Menu Manager & Accounts Team)
-    add_menu_page(
-        'Meal Admin Tools',
-        'Meal Admin Tools',
-        'read',
-        'cmp-admin-tools',
-        'cmp_standalone_render_manual_import',
-        'dashicons-admin-tools',
-        59
-    );
-
-    // Submenu 1: Default Importer
+    // Submenu 1: Default Importer (Moved to Meal Portal)
     add_submenu_page(
-        'cmp-admin-tools',
+        'cmp-menu-manager', // The unified parent slug
         'Import Legacy Subscriber',
         'Import Subscriber',
         'read',
@@ -36,9 +25,9 @@ function cmp_standalone_admin_tools_menu() {
         'cmp_standalone_render_manual_import'
     );
 
-    // Submenu 2: Cleanup Tool (Strictly Super Admin)
+    // Submenu 2: Cleanup Tool (Strictly Super Admin, Moved to Meal Portal)
     add_submenu_page(
-        'cmp-admin-tools',
+        'cmp-menu-manager', 
         'Database Cleanup',
         'Cleanup Tool',
         'manage_options',
@@ -46,23 +35,13 @@ function cmp_standalone_admin_tools_menu() {
         'cmp_standalone_render_cleanup'
     );
 
-    // Submenu 3: Deposit Manager (Under Meal Admin Tools)
+    // Submenu 3: Deposit Manager (Moved to Meal Portal)
     add_submenu_page(
-        'cmp-admin-tools',
+        'cmp-menu-manager', 
         'Deposit Manager',
         'Deposit Manager',
         'read',
         'cmp-deposit-manager',
-        'cmp_standalone_render_deposit_manager'
-    );
-
-    // Cross-Registration: Also show under the main Menu Manager menu for easy discovery
-    add_submenu_page(
-        'cmp-menu-manager',
-        'Deposit Manager',
-        'Deposit Manager',
-        'read',
-        'cmp-deposit-manager-portal',
         'cmp_standalone_render_deposit_manager'
     );
 }
