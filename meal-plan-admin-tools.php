@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.7
+ * Version: 1.8
  * Author: Fareed M Rifaideen
  */
 
@@ -191,6 +191,8 @@ function cmp_standalone_render_manual_import() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
+        $is_flexible    = isset($_POST['is_flexible']) ? 1 : 0; // PHASE 5 NEW
+        $allow_custom   = isset($_POST['allow_custom']) ? 1 : 0; // PHASE 5 NEW
 
         if (!empty($recipient_name)) {
             $plan_name .= ' - ' . $recipient_name;
@@ -233,6 +235,8 @@ function cmp_standalone_render_manual_import() {
                     'allowed_categories' => $categories,
                     'plan_price'         => $plan_price,
                     'discount_amount'    => $discount_amt,
+                    'is_flexible'        => $is_flexible,
+                    'allow_custom'       => $allow_custom,
                     'status'             => 'active',
                     'start_date'         => date('Y-m-d H:i:s'),
                     'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
@@ -366,6 +370,23 @@ function cmp_standalone_render_manual_import() {
                     <div style="flex: 1;">
                         <label style="font-weight: bold; display: block; margin-bottom: 5px;">Discount Amount (AED)</label>
                         <input type="number" step="0.01" name="discount_amount" min="0" style="width: 100%; padding: 6px;" placeholder="e.g. 150.00" value="0.00">
+                    </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px dashed #ccc; margin: 25px 0;">
+
+                <div style="display: flex; gap: 20px; margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                    <div style="flex:1;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
+                            <input type="checkbox" name="is_flexible" value="1"> Enable Flexible Menu Selection
+                        </label>
+                        <p style="font-size: 0.85em; color: #666; margin: 0;">Allows customers to pick any combination of meals across categories.</p>
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
+                            <input type="checkbox" name="allow_custom" value="1"> Enable Custom Type-in Meals
+                        </label>
+                        <p style="font-size: 0.85em; color: #666; margin: 0;">Removes dropdowns and lets customers type specific bespoke requests.</p>
                     </div>
                 </div>
 
@@ -739,6 +760,8 @@ function cmp_render_frontend_admin_tools() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
+        $is_flexible    = isset($_POST['is_flexible']) ? 1 : 0; // PHASE 5 NEW
+        $allow_custom   = isset($_POST['allow_custom']) ? 1 : 0; // PHASE 5 NEW
 
         if (!empty($recipient_name)) { $plan_name .= ' - ' . $recipient_name; }
 
@@ -769,6 +792,8 @@ function cmp_render_frontend_admin_tools() {
                 'allowed_categories' => $categories,
                 'plan_price'         => $plan_price,
                 'discount_amount'    => $discount_amt,
+                'is_flexible'        => $is_flexible,
+                'allow_custom'       => $allow_custom,
                 'status'             => 'active',
                 'start_date'         => date('Y-m-d H:i:s'),
                 'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
@@ -1009,6 +1034,23 @@ function cmp_render_frontend_admin_tools() {
                         </div>
                     </div>
 
+                    <hr style="border:0; border-top:1px dashed #ccc; margin:25px 0;">
+
+                    <div class="tools-flex" style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                        <div style="flex:1;">
+                            <label style="font-weight: bold; color: #334155; display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="is_flexible" value="1" style="transform: scale(1.2);"> Enable Flexible Menu Selection
+                            </label>
+                            <p style="font-size: 0.85em; color: #64748b; margin: 5px 0 0 25px;">Allows customers to pick any combination of meals across categories.</p>
+                        </div>
+                        <div style="flex:1;">
+                            <label style="font-weight: bold; color: #334155; display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" name="allow_custom" value="1" style="transform: scale(1.2);"> Enable Custom Type-in Meals
+                            </label>
+                            <p style="font-size: 0.85em; color: #64748b; margin: 5px 0 0 25px;">Removes dropdowns and lets customers type specific bespoke requests.</p>
+                        </div>
+                    </div>
+
                     <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
                 </form>
             </div>
@@ -1098,7 +1140,7 @@ function cmp_render_frontend_admin_tools() {
                 
                 <!-- RIGHT COLUMN: MAGIC LINKS -->
                 <div style="flex: 1; min-width: 300px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-top: 4px solid #8b5cf6;">
-                    <h3 style="margin-top: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
+                    <h3 style="margin: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
                     <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">Generate secure, single-use checkout links that automatically waive the AED 150 deposit and tag the new customer as "Own Bag". The link auto-destroys once the order is placed.</p>
                     
                     <form method="POST" style="margin-bottom: 25px;">
