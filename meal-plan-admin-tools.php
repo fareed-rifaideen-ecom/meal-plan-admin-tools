@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.8
+ * Version: 1.9
  * Author: Fareed M Rifaideen
  */
 
@@ -191,8 +191,10 @@ function cmp_standalone_render_manual_import() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
-        $is_flexible    = isset($_POST['is_flexible']) ? 1 : 0; // PHASE 5 NEW
-        $allow_custom   = isset($_POST['allow_custom']) ? 1 : 0; // PHASE 5 NEW
+        
+        $plan_mode      = isset($_POST['plan_mode']) ? sanitize_text_field($_POST['plan_mode']) : 'standard';
+        $is_flexible    = ($plan_mode === 'flexible') ? 1 : 0;
+        $allow_custom   = ($plan_mode === 'custom') ? 1 : 0;
 
         if (!empty($recipient_name)) {
             $plan_name .= ' - ' . $recipient_name;
@@ -375,19 +377,14 @@ function cmp_standalone_render_manual_import() {
 
                 <hr style="border: 0; border-top: 1px dashed #ccc; margin: 25px 0;">
 
-                <div style="display: flex; gap: 20px; margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
-                    <div style="flex:1;">
-                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
-                            <input type="checkbox" name="is_flexible" value="1"> Enable Flexible Menu Selection
-                        </label>
-                        <p style="font-size: 0.85em; color: #666; margin: 0;">Allows customers to pick any combination of meals across categories.</p>
-                    </div>
-                    <div style="flex:1;">
-                        <label style="font-weight: bold; display: block; margin-bottom: 5px;">
-                            <input type="checkbox" name="allow_custom" value="1"> Enable Custom Type-in Meals
-                        </label>
-                        <p style="font-size: 0.85em; color: #666; margin: 0;">Removes dropdowns and lets customers type specific bespoke requests.</p>
-                    </div>
+                <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                    <label style="font-weight: bold; color: #334155; display: block; margin-bottom: 8px;">Plan Mode (Menu Selection Type)</label>
+                    <select name="plan_mode" style="width: 100%; max-width: 400px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        <option value="standard">Standard Menu (Strict Categories)</option>
+                        <option value="flexible">Flexible Menu (Universal Dropdowns)</option>
+                        <option value="custom">Bespoke Custom (Text Inputs)</option>
+                    </select>
+                    <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                 </div>
 
                 <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #0073aa; padding: 5px 30px;">Import Single Customer</button>
@@ -760,8 +757,10 @@ function cmp_render_frontend_admin_tools() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
-        $is_flexible    = isset($_POST['is_flexible']) ? 1 : 0; // PHASE 5 NEW
-        $allow_custom   = isset($_POST['allow_custom']) ? 1 : 0; // PHASE 5 NEW
+        
+        $plan_mode      = isset($_POST['plan_mode']) ? sanitize_text_field($_POST['plan_mode']) : 'standard';
+        $is_flexible    = ($plan_mode === 'flexible') ? 1 : 0;
+        $allow_custom   = ($plan_mode === 'custom') ? 1 : 0;
 
         if (!empty($recipient_name)) { $plan_name .= ' - ' . $recipient_name; }
 
@@ -1036,19 +1035,14 @@ function cmp_render_frontend_admin_tools() {
 
                     <hr style="border:0; border-top:1px dashed #ccc; margin:25px 0;">
 
-                    <div class="tools-flex" style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
-                        <div style="flex:1;">
-                            <label style="font-weight: bold; color: #334155; display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="is_flexible" value="1" style="transform: scale(1.2);"> Enable Flexible Menu Selection
-                            </label>
-                            <p style="font-size: 0.85em; color: #64748b; margin: 5px 0 0 25px;">Allows customers to pick any combination of meals across categories.</p>
-                        </div>
-                        <div style="flex:1;">
-                            <label style="font-weight: bold; color: #334155; display: flex; align-items: center; gap: 8px;">
-                                <input type="checkbox" name="allow_custom" value="1" style="transform: scale(1.2);"> Enable Custom Type-in Meals
-                            </label>
-                            <p style="font-size: 0.85em; color: #64748b; margin: 5px 0 0 25px;">Removes dropdowns and lets customers type specific bespoke requests.</p>
-                        </div>
+                    <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                        <label class="tools-label" style="margin-bottom: 8px;">Plan Mode (Menu Selection Type)</label>
+                        <select name="plan_mode" class="tools-input" style="max-width: 400px;">
+                            <option value="standard">Standard Menu (Strict Categories)</option>
+                            <option value="flexible">Flexible Menu (Universal Dropdowns)</option>
+                            <option value="custom">Bespoke Custom (Text Inputs)</option>
+                        </select>
+                        <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                     </div>
 
                     <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
@@ -1140,7 +1134,7 @@ function cmp_render_frontend_admin_tools() {
                 
                 <!-- RIGHT COLUMN: MAGIC LINKS -->
                 <div style="flex: 1; min-width: 300px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-top: 4px solid #8b5cf6;">
-                    <h3 style="margin: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
+                    <h3 style="margin-top: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
                     <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">Generate secure, single-use checkout links that automatically waive the AED 150 deposit and tag the new customer as "Own Bag". The link auto-destroys once the order is placed.</p>
                     
                     <form method="POST" style="margin-bottom: 25px;">
