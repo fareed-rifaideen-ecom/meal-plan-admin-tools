@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.7
+ * Version: 1.9
  * Author: Fareed M Rifaideen
  */
 
@@ -191,6 +191,10 @@ function cmp_standalone_render_manual_import() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
+        
+        $plan_mode      = isset($_POST['plan_mode']) ? sanitize_text_field($_POST['plan_mode']) : 'standard';
+        $is_flexible    = ($plan_mode === 'flexible') ? 1 : 0;
+        $allow_custom   = ($plan_mode === 'custom') ? 1 : 0;
 
         if (!empty($recipient_name)) {
             $plan_name .= ' - ' . $recipient_name;
@@ -233,6 +237,8 @@ function cmp_standalone_render_manual_import() {
                     'allowed_categories' => $categories,
                     'plan_price'         => $plan_price,
                     'discount_amount'    => $discount_amt,
+                    'is_flexible'        => $is_flexible,
+                    'allow_custom'       => $allow_custom,
                     'status'             => 'active',
                     'start_date'         => date('Y-m-d H:i:s'),
                     'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
@@ -367,6 +373,18 @@ function cmp_standalone_render_manual_import() {
                         <label style="font-weight: bold; display: block; margin-bottom: 5px;">Discount Amount (AED)</label>
                         <input type="number" step="0.01" name="discount_amount" min="0" style="width: 100%; padding: 6px;" placeholder="e.g. 150.00" value="0.00">
                     </div>
+                </div>
+
+                <hr style="border: 0; border-top: 1px dashed #ccc; margin: 25px 0;">
+
+                <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                    <label style="font-weight: bold; color: #334155; display: block; margin-bottom: 8px;">Plan Mode (Menu Selection Type)</label>
+                    <select name="plan_mode" style="width: 100%; max-width: 400px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                        <option value="standard">Standard Menu (Strict Categories)</option>
+                        <option value="flexible">Flexible Menu (Universal Dropdowns)</option>
+                        <option value="custom">Bespoke Custom (Text Inputs)</option>
+                    </select>
+                    <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                 </div>
 
                 <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #0073aa; padding: 5px 30px;">Import Single Customer</button>
@@ -739,6 +757,10 @@ function cmp_render_frontend_admin_tools() {
         $allergies      = sanitize_textarea_field($_POST['allergies']);
         $plan_price     = floatval($_POST['plan_price']);
         $discount_amt   = floatval($_POST['discount_amount']);
+        
+        $plan_mode      = isset($_POST['plan_mode']) ? sanitize_text_field($_POST['plan_mode']) : 'standard';
+        $is_flexible    = ($plan_mode === 'flexible') ? 1 : 0;
+        $allow_custom   = ($plan_mode === 'custom') ? 1 : 0;
 
         if (!empty($recipient_name)) { $plan_name .= ' - ' . $recipient_name; }
 
@@ -769,6 +791,8 @@ function cmp_render_frontend_admin_tools() {
                 'allowed_categories' => $categories,
                 'plan_price'         => $plan_price,
                 'discount_amount'    => $discount_amt,
+                'is_flexible'        => $is_flexible,
+                'allow_custom'       => $allow_custom,
                 'status'             => 'active',
                 'start_date'         => date('Y-m-d H:i:s'),
                 'expiry_date'        => date('Y-m-d H:i:s', strtotime("+$remaining_days days")),
@@ -1007,6 +1031,18 @@ function cmp_render_frontend_admin_tools() {
                             <label class="tools-label">Discount Amount (AED)</label>
                             <input type="number" step="0.01" name="discount_amount" min="0" class="tools-input" placeholder="e.g. 150.00" value="0.00">
                         </div>
+                    </div>
+
+                    <hr style="border:0; border-top:1px dashed #ccc; margin:25px 0;">
+
+                    <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
+                        <label class="tools-label" style="margin-bottom: 8px;">Plan Mode (Menu Selection Type)</label>
+                        <select name="plan_mode" class="tools-input" style="max-width: 400px;">
+                            <option value="standard">Standard Menu (Strict Categories)</option>
+                            <option value="flexible">Flexible Menu (Universal Dropdowns)</option>
+                            <option value="custom">Bespoke Custom (Text Inputs)</option>
+                        </select>
+                        <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                     </div>
 
                     <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
