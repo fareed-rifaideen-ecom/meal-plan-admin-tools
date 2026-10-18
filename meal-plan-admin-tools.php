@@ -2,12 +2,39 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup & Deposit Wallet).
- * Version: 1.9
+ * Version: 1.9.1
  * Author: Fareed M Rifaideen
  */
 
 // Prevent direct file access
 if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+if ( function_exists( 'opcache_invalidate' ) ) {
+    @opcache_invalidate( __FILE__, true );
+}
+
+// Prevent Server/Browser Caching on Frontend Admin Tools & Staff Portal Shortcodes
+add_action( 'template_redirect', 'cmp_tools_disable_page_caching', 1 );
+function cmp_tools_disable_page_caching() {
+    if ( is_singular() ) {
+        global $post;
+        if ( $post && (
+            has_shortcode( $post->post_content, 'meal_admin_tools' ) ||
+            has_shortcode( $post->post_content, 'meal_super_admin' ) ||
+            has_shortcode( $post->post_content, 'meal_chef_assignment' ) ||
+            has_shortcode( $post->post_content, 'meal_menu_manager' )
+        ) ) {
+            if ( ! defined( 'DONOTCACHEPAGE' ) ) { define( 'DONOTCACHEPAGE', true ); }
+            if ( ! defined( 'DONOTCACHEOBJECT' ) ) { define( 'DONOTCACHEOBJECT', true ); }
+            if ( ! defined( 'DONOTCACHEDB' ) ) { define( 'DONOTCACHEDB', true ); }
+            nocache_headers();
+            header( 'Cache-Control: no-store, no-cache, must-revalidate, max-age=0' );
+            header( 'Pragma: no-cache' );
+            header( 'Expires: Wed, 11 Jan 1984 05:00:00 GMT' );
+            header( 'X-LiteSpeed-Cache-Control: no-cache' );
+        }
+    }
+}
 
 // ==========================================
 // 1. REGISTER INDEPENDENT ADMIN MENU
@@ -263,8 +290,8 @@ function cmp_standalone_render_manual_import() {
 
         <div style="background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; max-width: 800px; box-shadow: 0 1px 1px rgba(0,0,0,.04); margin-bottom: 30px;">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px;">
-                <h2 style="margin: 0; color: #1d6f42;">Bulk CSV Import</h2>
-                <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #1d6f42; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
+                <h2 style="margin: 0; color: #379237;">Bulk CSV Import</h2>
+                <a href="<?php echo admin_url('admin.php?page=cmp-admin-tools&cmp_download_template=1'); ?>" class="button" style="background: #379237; color: #fff; border: none; font-weight: bold;">Download CSV Template</a>
             </div>
             
             <p style="color: #666; margin-bottom: 20px;">Upload a CSV strictly matching the template headers to import multiple customers at once.</p>
@@ -272,7 +299,7 @@ function cmp_standalone_render_manual_import() {
             <form method="POST" action="" enctype="multipart/form-data" style="display: flex; align-items: center; gap: 15px; background: #f8f9fa; padding: 15px; border: 1px dashed #ccc; border-radius: 4px;">
                 <?php wp_nonce_field( 'cmp_csv_import_action', 'cmp_csv_import_nonce' ); ?>
                 <input type="file" name="csv_file" accept=".csv" required style="font-size: 1em;">
-                <button type="submit" name="cmp_run_csv_import" class="button button-primary" style="background: #1d6f42; border-color: #1d6f42;">Process CSV Upload</button>
+                <button type="submit" name="cmp_run_csv_import" class="button button-primary" style="background: #379237; border-color: #379237;">Process CSV Upload</button>
             </form>
         </div>
         
@@ -387,7 +414,7 @@ function cmp_standalone_render_manual_import() {
                     <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                 </div>
 
-                <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #0073aa; padding: 5px 30px;">Import Single Customer</button>
+                <button type="submit" name="cmp_run_import" class="button button-primary" style="background: #379237; border-color: #379237; padding: 5px 30px;">Import Single Customer</button>
             </form>
         </div>
     </div>
@@ -538,7 +565,7 @@ function cmp_standalone_render_deposit_manager() {
                 
                 <form method="POST" style="display: flex; gap: 15px; margin-bottom: 30px;">
                     <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 8px;">
-                    <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #f59e0b; border-color: #f59e0b; font-weight: bold;">Search Customer</button>
+                    <button type="submit" name="cmp_search_user" class="button button-primary" style="background: #379237; border-color: #379237; font-weight: bold;">Search Customer</button>
                 </form>
 
                 <?php if (!empty($found_users)): 
@@ -550,7 +577,7 @@ function cmp_standalone_render_deposit_manager() {
                         }
                         
                         $status_color = '#dc2626'; $status_bg = '#fee2e2'; $status_text = 'Refunded / No Deposit (Charge AED 150)';
-                        if ($deposit_held === 'yes') { $status_color = '#10b981'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
+                        if ($deposit_held === 'yes') { $status_color = '#379237'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
                         if ($deposit_held === 'own_bag') { $status_color = '#8b5cf6'; $status_bg = '#ede9fe'; $status_text = "Customer's Own Bag (Waived)"; }
                 ?>
                 <div style="background: #f9f9f9; padding: 20px; border: 1px solid #eee; border-left: 4px solid <?php echo $status_color; ?>; margin-bottom: 15px;">
@@ -571,7 +598,7 @@ function cmp_standalone_render_deposit_manager() {
                             <option value="own_bag" <?php selected($deposit_held, 'own_bag'); ?>>Customer's Own Bag</option>
                             <option value="no" <?php selected($deposit_held, 'no'); ?>>Refunded / No Deposit</option>
                         </select>
-                        <button type="submit" name="cmp_toggle_deposit" class="button" style="background: #334155; color: #fff; border: none; font-weight: bold; cursor: pointer;">
+                        <button type="submit" name="cmp_toggle_deposit" class="button" style="background: #379237; color: #fff; border: none; font-weight: bold; cursor: pointer;">
                             Update Wallet
                         </button>
                     </form>
@@ -635,16 +662,23 @@ function cmp_standalone_render_deposit_manager() {
 // ==========================================
 add_shortcode( 'meal_admin_tools', 'cmp_render_frontend_admin_tools' );
 function cmp_render_frontend_admin_tools() {
-    
-    // 1. Security Check
-    if ( ! is_user_logged_in() ) {
-        $login_args = array('echo' => false, 'form_id' => 'cmp-tools-login', 'label_username' => __('Email Address or Username'), 'label_password' => __('Password'));
-        $custom_css = '<style>#cmp-tools-login label { display: block; margin-bottom: 5px; font-weight: bold; color: #333; text-align: left; } #cmp-tools-login input[type="text"], #cmp-tools-login input[type="password"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; } #cmp-tools-login .login-submit input[type="submit"] { width: 100%; background: #0073aa; color: white; border: none; padding: 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }</style>';
-        return $custom_css . '<div style="max-width:400px; margin:50px auto; padding:30px; background:#f8f9fa; border-radius:8px; border:1px solid #ddd; box-shadow: 0 2px 10px rgba(0,0,0,0.05);"><h2 style="text-align:center; margin-top:0; color:#222;">Admin Tools Login</h2><p style="text-align:center; color:#666; margin-bottom:20px;">Authorized staff account required.</p>' . wp_login_form( $login_args ) . '</div>';
+    if ( ! defined( 'DONOTCACHEPAGE' ) ) {
+        define( 'DONOTCACHEPAGE', true );
     }
 
-    if ( !current_user_can('manage_options') && !current_user_can('menu_manager') && !current_user_can('accounts_team') && !current_user_can('foh_manager') ) {
-        return '<div style="max-width: 600px; margin: 50px auto; padding: 30px; background: #fff; border-left: 4px solid #dc3232; box-shadow: 0 4px 6px rgba(0,0,0,0.05);"><p style="font-size: 1.1em; color: #dc3232;"><strong>Access Denied:</strong> Authorized personnel only.</p></div>';
+    $has_tools_access = current_user_can( 'manage_options' ) || current_user_can( 'menu_manager' ) || current_user_can( 'accounts_team' ) || current_user_can( 'foh_manager' );
+
+    // 1. Security & Custom Glassmorphism UI/UX Login Screen
+    if ( ! is_user_logged_in() || ! $has_tools_access ) {
+        if ( function_exists( 'cmp_render_portal_login_ui' ) ) {
+            return cmp_render_portal_login_ui( array(
+                'portal_id'      => 'admin_tools',
+                'title'          => 'Admin Tools Portal',
+                'subtitle'       => 'Legacy Imports, Database Maintenance & Deposit Wallet',
+                'required_caps'  => array( 'manage_options', 'menu_manager', 'accounts_team', 'foh_manager' ),
+                'denied_message' => 'Authorized Staff clearance (Admin, Menu Manager, FOH, or Accounts) is required to access Admin Tools.',
+            ) );
+        }
     }
 
     global $wpdb;
@@ -734,9 +768,9 @@ function cmp_render_frontend_admin_tools() {
                 }
                 fclose($handle);
 
-                if ($success_count > 0) $import_message .= '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Imported ' . $success_count . ' customers.</div>';
-                if (!empty($failed_rows)) $import_message .= '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Warning:</strong> Some rows failed:<br>' . implode('<br>', $failed_rows) . '</div>';
-            } else { $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Error reading CSV.</div>'; }
+                if ($success_count > 0) $import_message .= '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> Imported ' . $success_count . ' customers.</div>';
+                if (!empty($failed_rows)) $import_message .= '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; border-left:4px solid #dc2626; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Warning:</strong> Some rows failed:<br>' . implode('<br>', $failed_rows) . '</div>';
+            } else { $import_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">Error reading CSV.</div>'; }
         }
     }
 
@@ -765,7 +799,7 @@ function cmp_render_frontend_admin_tools() {
         if (!empty($recipient_name)) { $plan_name .= ' - ' . $recipient_name; }
 
         if (empty($email) || empty($plan_name) || $remaining_days <= 0) {
-            $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Error: Email, Plan, and Days are required.</div>';
+            $import_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">Error: Email, Plan, and Days are required.</div>';
         } else {
             $user = get_user_by('email', $email);
             if (!$user) {
@@ -803,9 +837,9 @@ function cmp_render_frontend_admin_tools() {
                 $new_sub_id = $wpdb->insert_id;
                 $wpdb->update($table_subs, array('wc_order_id' => -$new_sub_id), array('id' => $new_sub_id));
 
-                $import_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> ' . esc_html($first_name) . ' added.</div>';
+                $import_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> ' . esc_html($first_name) . ' added.</div>';
             } else {
-                $import_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Database Error.</div>';
+                $import_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">Database Error.</div>';
             }
         }
     }
@@ -816,19 +850,19 @@ function cmp_render_frontend_admin_tools() {
         $days_old = intval( $_POST['days_old'] );
         $confirm  = isset( $_POST['confirm_delete'] );
         if ( $days_old < 30 ) {
-            $cleanup_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Minimum 30 days required.</div>';
+            $cleanup_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">Minimum 30 days required.</div>';
         } elseif ( ! $confirm ) {
-            $cleanup_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">Please check confirmation box.</div>';
+            $cleanup_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">Please check confirmation box.</div>';
         } else {
             $cutoff_date    = date( 'Y-m-d H:i:s', strtotime( "-$days_old days" ) );
             $subs_to_delete = $wpdb->get_col( $wpdb->prepare( "SELECT id FROM $table_subs WHERE expiry_date < %s", $cutoff_date ) );
             if ( empty( $subs_to_delete ) ) {
-                $cleanup_message = '<div style="background:#e0f2fe; color:#0369a1; padding:15px; border-radius:6px; margin-bottom:20px;">No old subscriptions found.</div>';
+                $cleanup_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #DCECC9; padding:15px; border-radius:8px; margin-bottom:20px;">No old subscriptions found.</div>';
             } else {
                 $ids_list     = implode( ',', array_map( 'intval', $subs_to_delete ) );
                 $logs_deleted = $wpdb->query( "DELETE FROM $table_logs WHERE subscription_id IN ($ids_list)" );
                 $subs_deleted = $wpdb->query( "DELETE FROM $table_subs WHERE id IN ($ids_list)" );
-                $cleanup_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deleted ' . intval($subs_deleted) . ' plans and ' . intval($logs_deleted) . ' logs.</div>';
+                $cleanup_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> Deleted ' . intval($subs_deleted) . ' plans and ' . intval($logs_deleted) . ' logs.</div>';
             }
         }
     }
@@ -847,7 +881,7 @@ function cmp_render_frontend_admin_tools() {
             'by'   => wp_get_current_user()->display_name
         );
         update_option('cmp_active_magic_links', $links);
-        $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Magic link generated successfully.</div>';
+        $deposit_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> Magic link generated successfully.</div>';
     }
 
     if (isset($_POST['cmp_frontend_revoke_magic_link']) && wp_verify_nonce($_POST['cmp_deposit_nonce'], 'cmp_frontend_deposit')) {
@@ -857,7 +891,7 @@ function cmp_render_frontend_admin_tools() {
         if (isset($links[$token_to_revoke])) {
             unset($links[$token_to_revoke]);
             update_option('cmp_active_magic_links', $links);
-            $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Magic link revoked.</div>';
+            $deposit_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> Magic link revoked.</div>';
         }
     }
     
@@ -887,7 +921,7 @@ function cmp_render_frontend_admin_tools() {
         }
 
         if (empty($found_users)) {
-            $deposit_message = '<div style="background:#fee2e2; color:#991b1b; padding:15px; border-radius:6px; margin-bottom:20px;">No customer found matching "'.esc_html($raw_query).' ".</div>';
+            $deposit_message = '<div style="background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:15px; border-radius:8px; margin-bottom:20px;">No customer found matching "'.esc_html($raw_query).' ".</div>';
         }
     }
 
@@ -897,7 +931,7 @@ function cmp_render_frontend_admin_tools() {
         $user_id    = intval($_POST['user_id']);
         $new_status = sanitize_text_field($_POST['new_status']);
         update_user_meta($user_id, '_cmp_deposit_held', $new_status);
-        $deposit_message = '<div style="background:#dcfce7; color:#166534; padding:15px; border-radius:6px; margin-bottom:20px;"><strong>Success!</strong> Deposit wallet status updated.</div>';
+        $deposit_message = '<div style="background:#EEF7E3; color:#1B5E20; border:1px solid #b7e1a1; border-left:4px solid #379237; padding:15px; border-radius:8px; margin-bottom:20px; font-weight:600;"><strong>Success!</strong> Deposit wallet status updated.</div>';
         
         $found_users[] = get_userdata($user_id);
     }
@@ -905,24 +939,74 @@ function cmp_render_frontend_admin_tools() {
     ob_start();
     ?>
     <style>
-        .tools-wrap { max-width: 1200px; margin: 0 auto; font-family: inherit; }
-        .tools-nav { display: flex; border-bottom: 2px solid #ddd; margin-bottom: 25px; overflow-x: auto; }
-        .tools-tab-btn { background: none; border: none; padding: 15px 30px; font-size: 1.1em; font-weight: bold; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; }
-        .tools-tab-btn.active { color: #0f172a; border-bottom: 3px solid #0f172a; }
+        .tools-wrap { max-width: 1200px; margin: 0 auto; font-family: inherit; padding: 0 12px; }
+        
+        /* Desktop Admin Tools Glass Header (> 992px) */
+        .tools-header-banner {
+            background: linear-gradient(135deg, rgba(27, 94, 32, 0.92) 0%, rgba(55, 146, 55, 0.86) 55%, rgba(104, 185, 70, 0.82) 100%) !important;
+            backdrop-filter: blur(18px) !important;
+            -webkit-backdrop-filter: blur(18px) !important;
+            color: #fff !important;
+            padding: 25px 28px !important;
+            border-radius: 18px !important;
+            border: 1.5px solid #DCECC9 !important;
+            border-bottom: 4px solid #68B946 !important;
+            box-shadow: 0 14px 34px rgba(27, 94, 32, 0.14) !important;
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            flex-wrap: wrap !important;
+            gap: 15px !important;
+            margin-bottom: 24px !important;
+        }
+        .tools-header-banner h2 { margin: 0 !important; color: #ffffff !important; font-size: 1.9em !important; font-weight: 800 !important; }
+        .tools-header-banner p { margin: 5px 0 0 0 !important; color: #EEF7E3 !important; font-weight: 500 !important; }
+
+        /* Tablet Admin Tools Glass Header (601px - 991px) */
+        @media (min-width: 601px) and (max-width: 991px) {
+            .tools-header-banner {
+                background: linear-gradient(125deg, rgba(220, 236, 201, 0.92) 0%, rgba(104, 185, 70, 0.42) 100%) !important;
+                border: 1.5px solid #379237 !important;
+                padding: 22px 24px !important;
+            }
+            .tools-header-banner h2 { color: #231F20 !important; font-size: 1.65em !important; }
+            .tools-header-banner p { color: #1B5E20 !important; }
+        }
+
+        /* Mobile Admin Tools Glass Header (<= 600px) */
+        @media (max-width: 600px) {
+            .tools-header-banner {
+                background: linear-gradient(145deg, rgba(55, 146, 55, 0.95) 0%, rgba(27, 94, 32, 0.92) 100%) !important;
+                border: 1.5px solid #68B946 !important;
+                border-radius: 16px !important;
+                padding: 18px !important;
+            }
+            .tools-header-banner h2 { color: #ffffff !important; font-size: 1.45em !important; }
+            .tools-header-banner p { color: #DCECC9 !important; font-size: 0.9em !important; }
+        }
+
+        .tools-nav { display: flex; border-bottom: 2px solid #DCECC9; margin-bottom: 25px; overflow-x: auto; gap: 6px; }
+        .tools-tab-btn { background: none; border: none; padding: 14px 28px; font-size: 1.05em; font-weight: 800; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; white-space: nowrap; transition: 0.2s; }
+        .tools-tab-btn:hover { color: #1B5E20; }
+        .tools-tab-btn.active { color: #1B5E20; border-bottom: 3px solid #379237; background: rgba(238, 247, 227, 0.5); border-radius: 8px 8px 0 0; }
         .tools-content { display: none; padding: 10px 0; }
         .tools-content.active { display: block; }
-        .tools-card { background: #fff; padding: 25px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 30px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-        .tools-input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; margin-top: 5px; }
-        .tools-label { font-weight: bold; color: #334155; display: block; margin-bottom: 2px; }
+        .tools-card { background: #fff; padding: 25px; border-radius: 12px; border: 1px solid #DCECC9; margin-bottom: 30px; box-shadow: 0 4px 14px rgba(27,94,32,0.05); }
+        .tools-input { width: 100%; padding: 10px 12px; border: 1.5px solid #cbd5e1; border-radius: 8px; box-sizing: border-box; margin-top: 5px; }
+        .tools-input:focus { border-color: #379237; outline: none; box-shadow: 0 0 0 3px rgba(55, 146, 55, 0.15); }
+        .tools-label { font-weight: bold; color: #231F20; display: block; margin-bottom: 2px; }
         .tools-flex { display: flex; gap: 20px; margin-bottom: 15px; flex-wrap: wrap; }
         .tools-flex > div { flex: 1; min-width: 200px; }
     </style>
 
     <div class="tools-wrap">
-        <div style="background: #0f172a; color: #fff; padding: 25px; border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <div class="tools-header-banner">
             <div>
-                <h2 style="margin: 0; color: #fff;">Admin Tools</h2>
-                <p style="margin: 5px 0 0 0; color: #94a3b8;">Legacy Imports, Logistics & Deposit Operations</p>
+                <h2>Admin Tools</h2>
+                <p>The Cycle Bistro &mdash; Legacy Imports, Logistics &amp; Deposit Operations</p>
+            </div>
+            <div>
+                <a href="<?php echo esc_url( wp_logout_url( get_permalink() ) ); ?>" style="background: #dc2626; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Log Out</a>
             </div>
         </div>
 
@@ -943,21 +1027,21 @@ function cmp_render_frontend_admin_tools() {
         <div id="tab-import" class="tools-content <?php echo $active_tab == 'tab-import' ? 'active' : ''; ?>">
             <?php echo $import_message; ?>
             
-            <div class="tools-card" style="border-left: 4px solid #10b981;">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px;">
-                    <h3 style="margin: 0; color: #047857;">Bulk CSV Import</h3>
-                    <a href="?cmp_download_template=1" style="background: #10b981; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; font-size: 0.9em;">Download CSV Template</a>
+            <div class="tools-card" style="border-left: 5px solid #379237;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 15px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+                    <h3 style="margin: 0; color: #1B5E20;">Bulk CSV Import</h3>
+                    <a href="?cmp_download_template=1" style="background: #379237; color: white; padding: 8px 15px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 0.9em;">Download CSV Template</a>
                 </div>
                 <p style="color: #64748b; margin-bottom: 20px;">Upload a CSV to import multiple subscribers. Family recipients can be specified by appending their name to the Plan Name (e.g., "2 Meal Plan - Sarah").</p>
-                <form method="POST" enctype="multipart/form-data" style="display: flex; gap: 15px; align-items: center;">
+                <form method="POST" enctype="multipart/form-data" style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
                     <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
-                    <input type="file" name="csv_file" accept=".csv" required style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; flex-grow: 1;">
-                    <button type="submit" name="cmp_frontend_csv_import" style="background: #047857; color: white; border: none; padding: 12px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Upload CSV</button>
+                    <input type="file" name="csv_file" accept=".csv" required style="padding: 10px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 6px; flex-grow: 1;">
+                    <button type="submit" name="cmp_frontend_csv_import" style="background: linear-gradient(135deg, #379237 0%, #1B5E20 100%); color: white; border: none; padding: 12px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">Upload CSV</button>
                 </form>
             </div>
 
-            <div class="tools-card" style="border-left: 4px solid #0284c7;">
-                <h3 style="margin-top: 0; color: #0369a1; border-bottom: 1px solid #eee; padding-bottom: 15px;">Single Manual Entry Form</h3>
+            <div class="tools-card" style="border-left: 5px solid #1B5E20;">
+                <h3 style="margin-top: 0; color: #231F20; border-bottom: 1px solid #eee; padding-bottom: 15px;">Single Manual Entry Form</h3>
                 <form method="POST">
                     <?php wp_nonce_field('cmp_frontend_import', 'cmp_import_nonce'); ?>
                     <div class="tools-flex">
@@ -1035,17 +1119,17 @@ function cmp_render_frontend_admin_tools() {
 
                     <hr style="border:0; border-top:1px dashed #ccc; margin:25px 0;">
 
-                    <div style="margin-bottom: 25px; background: #f8fafc; padding: 15px; border-radius: 4px; border: 1px solid #e2e8f0;">
-                        <label class="tools-label" style="margin-bottom: 8px;">Plan Mode (Menu Selection Type)</label>
-                        <select name="plan_mode" class="tools-input" style="max-width: 400px;">
+                    <div style="margin-bottom: 25px; background: #EEF7E3; padding: 15px; border-radius: 8px; border: 1px solid #DCECC9;">
+                        <label class="tools-label" style="margin-bottom: 8px; color: #1B5E20;">Plan Mode (Menu Selection Type)</label>
+                        <select name="plan_mode" class="tools-input" style="max-width: 400px; background: #fff;">
                             <option value="standard">Standard Menu (Strict Categories)</option>
                             <option value="flexible">Flexible Menu (Universal Dropdowns)</option>
                             <option value="custom">Bespoke Custom (Text Inputs)</option>
                         </select>
-                        <p style="font-size: 0.85em; color: #64748b; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
+                        <p style="font-size: 0.85em; color: #1B5E20; margin: 8px 0 0 0;"><strong>Standard:</strong> Restricts to Breakfast/Lunch/Dinner. <strong>Flexible:</strong> Allows picking any combination. <strong>Custom:</strong> Replaces dropdowns with free-text typing.</p>
                     </div>
 
-                    <button type="submit" name="cmp_frontend_manual_import" style="background: #0284c7; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
+                    <button type="submit" name="cmp_frontend_manual_import" style="background: linear-gradient(135deg, #379237 0%, #1B5E20 100%); color: white; border: none; padding: 12px 30px; border-radius: 8px; font-weight: bold; cursor: pointer;">Import Single Customer</button>
                 </form>
             </div>
         </div>
@@ -1055,14 +1139,14 @@ function cmp_render_frontend_admin_tools() {
         <!-- TAB 2: CLEANUP -->
         <div id="tab-cleanup" class="tools-content <?php echo $active_tab == 'tab-cleanup' ? 'active' : ''; ?>">
             <?php echo $cleanup_message; ?>
-            <div class="tools-card" style="border-left: 4px solid #dc2626;">
+            <div class="tools-card" style="border-left: 5px solid #dc2626;">
                 <h3 style="margin-top: 0; color: #991b1b; border-bottom: 1px solid #eee; padding-bottom: 15px;">Purge Old Subscription Data</h3>
                 <p style="color: #64748b; margin-bottom: 25px;">Permanently delete expired subscriptions and logs. Customer profiles and addresses will not be deleted.</p>
                 <form method="POST">
                     <?php wp_nonce_field('cmp_frontend_cleanup', 'cmp_cleanup_nonce'); ?>
                     <div style="margin-bottom: 20px;">
                         <label class="tools-label">Target Timeframe:</label>
-                        Delete plans expired more than <input type="number" name="days_old" value="90" min="30" style="width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;"> days ago. (Min 30)
+                        Delete plans expired more than <input type="number" name="days_old" value="90" min="30" style="width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px;"> days ago. (Min 30)
                     </div>
                     <div style="margin-bottom: 25px;">
                         <label style="color: #dc2626; font-weight: bold; cursor: pointer;">
@@ -1070,7 +1154,7 @@ function cmp_render_frontend_admin_tools() {
                             I understand this is irreversible.
                         </label>
                     </div>
-                    <button type="submit" name="cmp_frontend_run_cleanup" style="background: #dc2626; color: white; border: none; padding: 12px 30px; border-radius: 4px; font-weight: bold; cursor: pointer;">Permanently Delete Old Records</button>
+                    <button type="submit" name="cmp_frontend_run_cleanup" style="background: #dc2626; color: white; border: none; padding: 12px 30px; border-radius: 8px; font-weight: bold; cursor: pointer;">Permanently Delete Old Records</button>
                 </form>
             </div>
         </div>
@@ -1083,13 +1167,13 @@ function cmp_render_frontend_admin_tools() {
             <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start;">
                 
                 <!-- LEFT COLUMN: SEARCH & UPDATE -->
-                <div style="flex: 2; min-width: 400px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
+                <div style="flex: 2; min-width: 320px; background: #fff; padding: 24px 30px; border: 1px solid #DCECC9; border-radius: 12px; box-shadow: 0 4px 14px rgba(27,94,32,0.05);">
                     <p style="color: #64748b; margin-bottom: 20px;">Search by Name, Email, or Phone to view or update a customer's Bag Deposit Wallet.</p>
                     
-                    <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px;">
+                    <form method="POST" style="display: flex; gap: 15px; margin-bottom: 25px; flex-wrap: wrap;">
                         <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                        <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; padding: 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
-                        <button type="submit" name="cmp_frontend_search_deposit" style="background: #f59e0b; color: white; border: none; padding: 10px 25px; border-radius: 4px; font-weight: bold; cursor: pointer;">Search Customer</button>
+                        <input type="text" name="search_term" placeholder="Search by Name, Email, or Phone Number..." value="<?php echo esc_attr($raw_query); ?>" required style="flex: 1; min-width: 200px; padding: 10px 12px; border: 1.5px solid #cbd5e1; border-radius: 8px;">
+                        <button type="submit" name="cmp_frontend_search_deposit" style="background: linear-gradient(135deg, #379237 0%, #1B5E20 100%); color: white; border: none; padding: 10px 25px; border-radius: 8px; font-weight: bold; cursor: pointer;">Search Customer</button>
                     </form>
 
                     <?php if (!empty($found_users)): 
@@ -1101,30 +1185,30 @@ function cmp_render_frontend_admin_tools() {
                             }
                             
                             $status_color = '#dc2626'; $status_bg = '#fee2e2'; $status_text = 'Refunded / No Deposit (Charge AED 150)';
-                            if ($deposit_held === 'yes') { $status_color = '#10b981'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
+                            if ($deposit_held === 'yes') { $status_color = '#379237'; $status_bg = '#dcfce7'; $status_text = 'Bag Deposit Held (Waived)'; }
                             if ($deposit_held === 'own_bag') { $status_color = '#8b5cf6'; $status_bg = '#ede9fe'; $status_text = "Customer's Own Bag (Waived)"; }
                     ?>
-                    <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-left: 4px solid <?php echo $status_color; ?>; border-radius: 6px; margin-bottom: 15px;">
-                        <h4 style="margin: 0 0 5px 0; color: #0f172a; font-size: 1.2em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h4>
+                    <div style="background: #f8fafc; padding: 20px; border: 1px solid #e2e8f0; border-left: 4px solid <?php echo $status_color; ?>; border-radius: 8px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 5px 0; color: #231F20; font-size: 1.2em;"><?php echo esc_html($searched_user->first_name . ' ' . $searched_user->last_name); ?></h4>
                         <p style="margin: 0 0 5px 0; color: #64748b;"><?php echo esc_html($searched_user->user_email); ?></p>
                         <?php $phone = get_user_meta($searched_user->ID, 'billing_phone', true); if($phone): ?>
                             <p style="margin: 0 0 15px 0; color: #64748b; font-size: 0.9em;">Phone: <?php echo esc_html($phone); ?></p>
                         <?php endif; ?>
                         
                         <p style="font-size: 1em; margin-bottom: 15px;"><strong>Status:</strong> 
-                            <span style="color: <?php echo $status_color; ?>; font-weight: bold; background: <?php echo $status_bg; ?>; padding: 4px 10px; border-radius: 4px; font-size: 0.9em;"><?php echo $status_text; ?></span>
+                            <span style="color: <?php echo $status_color; ?>; font-weight: bold; background: <?php echo $status_bg; ?>; padding: 4px 10px; border-radius: 6px; font-size: 0.9em;"><?php echo $status_text; ?></span>
                         </p>
                         
                         <form method="POST" style="margin: 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                             <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
                             <input type="hidden" name="search_term" value="<?php echo esc_attr($raw_query); ?>">
                             <input type="hidden" name="user_id" value="<?php echo $searched_user->ID; ?>">
-                            <select name="new_status" style="padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px;">
+                            <select name="new_status" style="padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px;">
                                 <option value="yes" <?php selected($deposit_held, 'yes'); ?>>Deposit Held</option>
                                 <option value="own_bag" <?php selected($deposit_held, 'own_bag'); ?>>Customer's Own Bag</option>
                                 <option value="no" <?php selected($deposit_held, 'no'); ?>>Refunded / No Deposit</option>
                             </select>
-                            <button type="submit" name="cmp_frontend_toggle_deposit" class="button" style="background: #334155; color: white; border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; cursor: pointer;">
+                            <button type="submit" name="cmp_frontend_toggle_deposit" class="button" style="background: #379237; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-weight: bold; cursor: pointer;">
                                 Update Wallet
                             </button>
                         </form>
@@ -1133,13 +1217,13 @@ function cmp_render_frontend_admin_tools() {
                 </div>
                 
                 <!-- RIGHT COLUMN: MAGIC LINKS -->
-                <div style="flex: 1; min-width: 300px; background: #fff; padding: 20px 30px; border: 1px solid #ccd0d4; border-radius: 4px; box-shadow: 0 1px 1px rgba(0,0,0,.04); border-top: 4px solid #8b5cf6;">
+                <div style="flex: 1; min-width: 300px; background: #fff; padding: 24px 30px; border: 1px solid #DCECC9; border-radius: 12px; box-shadow: 0 4px 14px rgba(27,94,32,0.05); border-top: 4px solid #8b5cf6;">
                     <h3 style="margin-top: 0; color: #7c3aed; border-bottom: 1px solid #eee; padding-bottom: 10px;">"Own Bag" VIP Links</h3>
                     <p style="color: #64748b; font-size: 0.9em; margin-bottom: 20px;">Generate secure, single-use checkout links that automatically waive the AED 150 deposit and tag the new customer as "Own Bag". The link auto-destroys once the order is placed.</p>
                     
                     <form method="POST" style="margin-bottom: 25px;">
                         <?php wp_nonce_field('cmp_frontend_deposit', 'cmp_deposit_nonce'); ?>
-                        <button type="submit" name="cmp_frontend_generate_magic_link" class="button button-primary" style="background: #7c3aed; border-color: #7c3aed; font-weight: bold; width: 100%;">+ Generate New Link</button>
+                        <button type="submit" name="cmp_frontend_generate_magic_link" class="button button-primary" style="background: #7c3aed; border-color: #7c3aed; color: #fff; padding: 10px 18px; border-radius: 8px; font-weight: bold; width: 100%; cursor: pointer;">+ Generate New Link</button>
                     </form>
 
                     <?php 
