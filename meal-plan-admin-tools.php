@@ -1,9 +1,11 @@
 <?php
 /**
  * Plugin Name: Meal Plan Admin Tools
+ * Plugin URI: https://github.com/fareed-rifaideen-ecom/meal-plan-admin-tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup, Deposit Wallet & Per-Plan Logistics).
  * Version: 2.1.1
  * Author: Fareed M Rifaideen
+ * Author URI: https://fareed-rifaideen.netlify.app
  */
 
 // Prevent direct file access
