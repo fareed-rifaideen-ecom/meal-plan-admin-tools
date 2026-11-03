@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Meal Plan Admin Tools
  * Description: Standalone backend utilities for the Meal Plan system (Manual Legacy Importer, Bulk CSV Importer, Database Cleanup, Deposit Wallet & Per-Plan Logistics).
- * Version: 2.0
+ * Version: 2.1.1
  * Author: Fareed M Rifaideen
  */
 
